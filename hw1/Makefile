@@ -1,6 +1,6 @@
 .PHONY: all test clean
 
-SUBMIT := hellocaml.ml providedtests.ml
+SUBMIT := hellocaml.ml providedtests.ml randomast.ml
 
 main.native: $(SUBMIT)
 	ocamlbuild -Is util -libs unix,str main.native

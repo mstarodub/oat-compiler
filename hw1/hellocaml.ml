@@ -324,11 +324,11 @@ let quadrupled_z_again : int = twice double z  (* pass double to twice *)
   makes the first case of part1_tests "Problem 1" succeed. See the
   gradedtests.ml file.
 *)
-let pieces : int = -1
+let pieces : int = 8
 
 (* Implement a function cube that takes an int value and produces its cube. *)
 let cube : int -> int =
-	fun _ -> failwith "cube unimplemented"
+	fun x -> x * x * x
 
 
 (* Problem 1-2 *)
@@ -340,7 +340,7 @@ let cube : int -> int =
   and computes the total value in centimes:
 *)
 let centimes_of : int -> int -> int =
-  fun _ -> failwith "centimes_of unimplemented"
+  fun rp fr -> rp + 100 * fr
 
 
 (* Problem 1-3 *)
@@ -496,8 +496,7 @@ let pair_up (x:'a) : ('a * 'a) = (x, x)
   Complete the definition of third_of_three; be sure to give it
   the correct type signature:
 *)
-let third_of_three _ = failwith
-  "third_of_three unimplemented"
+let third_of_three ((x, y, z) : 'a * 'b * 'c) : 'c = z
 
 
 (*
@@ -510,7 +509,7 @@ let third_of_three _ = failwith
 *)
 
 let compose_pair (p:(('b -> 'c) * ('a -> 'b))) : 'a -> 'c =
-  failwith "compose_pair unimplemented"
+  fun x -> fst p @@ snd p @@ x
 
 
 
@@ -684,7 +683,9 @@ let rec mylist_to_list (l:'a mylist) : 'a list =
   the inverse of the mylist_to_list function given above.
 *)
 let rec list_to_mylist (l:'a list) : 'a mylist =
-  failwith "list_to_mylist unimplemented"
+  match l with
+    | [] -> Nil
+    | (x::xs) -> Cons(x, list_to_mylist xs)
 
 
 (*
@@ -701,7 +702,9 @@ let rec list_to_mylist (l:'a list) : 'a mylist =
   append.  So (List.append [1;2] [3]) is the same as  ([1;2] @ [3]).
 *)
 let rec append (l1:'a list) (l2:'a list) : 'a list =
-  failwith "append unimplemented"
+  match l1 with
+    | [] -> l2
+    | x::xs -> x :: (append xs l2)
 
 (*
   Problem 3-3
@@ -710,7 +713,9 @@ let rec append (l1:'a list) (l2:'a list) : 'a list =
   you might want to call append.  Do not use the library function.
 *)
 let rec rev (l:'a list) : 'a list =
-  failwith "rev unimplemented"
+  match l with
+    | [] -> []
+    | x::xs -> append (rev xs) [x]
 
 (*
   Problem 3-4
@@ -724,7 +729,8 @@ let rec rev (l:'a list) : 'a list =
 let rev_t (l: 'a list) : 'a list =
   let rec rev_aux l acc =
     begin match l with
-      | _ -> failwith "rev_t unimplemented"
+      | [] -> acc
+      | x::xs -> rev_aux xs (x::acc)
     end
   in
   rev_aux l []
@@ -744,7 +750,11 @@ let rev_t (l: 'a list) : 'a list =
   evaluates to true or false.
 *)
 let rec insert (x:'a) (l:'a list) : 'a list =
-  failwith "insert unimplemented"
+  match l with
+    | [] -> [x]
+    | (y::ys) when x = y -> l
+    | (y::ys) when x < y -> x::l
+    | (y::ys) when x > y -> y::(insert x ys)
 
 
 (*
@@ -755,7 +765,9 @@ let rec insert (x:'a) (l:'a list) : 'a list =
   Hint: you might want to use the insert function that you just defined.
 *)
 let rec union (l1:'a list) (l2:'a list) : 'a list =
-  failwith "union unimplemented"
+  match l1 with
+    | [] -> l2
+    | x::xs -> union xs (insert x l2)
 
 
 
@@ -846,7 +858,12 @@ let e3 : exp = Mult(Var "y", Mult(e2, Neg e2))     (* "y * ((x+1) * -(x+1))" *)
   Hint: you probably want to use the 'union' function you wrote for Problem 3-5.
 *)
 let rec vars_of (e:exp) : string list =
-  failwith "vars_of unimplemented"
+  match e with
+    | Var(x) -> [x]
+    | Const(x) -> []
+    | Add(x, y)
+    | Mult(x, y) -> union (vars_of x) (vars_of y)
+    | Neg(x) -> vars_of x
 
 
 (*
@@ -865,7 +882,12 @@ let rec vars_of (e:exp) : string list =
 *)
 
 let rec string_of (e:exp) : string =
-  failwith "string_of unimplemented"
+  match e with
+    | Var(x) -> x
+    | Const(x) -> Int64.to_string x
+    | Add(x, y) -> "(" ^ (string_of x) ^ " + " ^ (string_of y) ^ ")"
+    | Mult(x, y) -> "(" ^ (string_of x) ^ " * " ^ (string_of y) ^ ")"
+    | Neg(x) -> "-(" ^ (string_of x) ^ ")"
 
 (*
   How should we _interpret_ (i.e. give meaning to) an expression?
@@ -898,7 +920,7 @@ let ctxt2 : ctxt = [("x", 2L); ("y", 7L)]  (* maps "x" to 2L, "y" to 7L *)
    For example:
       lookup "x" ctxt1    should yield 3L
       lookup "x" ctxt2    should yield 2L
-      lookup "y" cxtx2    should yield 7L
+      lookup "y" ctxt2    should yield 7L
 
   What if we lookup a variable that doesn't appear in the context?  In that
   case we raise an exception.  OCaml provides user-defined and some pre-
@@ -926,7 +948,9 @@ let ctxt2 : ctxt = [("x", 2L); ("y", 7L)]  (* maps "x" to 2L, "y" to 7L *)
   such value, it should raise the Not_found exception.
 *)
 let rec lookup (x:string) (c:ctxt) : int64 =
-  failwith "unimplemented"
+  match c with
+    | [] -> raise Not_found
+    | (var, value)::vs -> if x = var then value else lookup x vs
 
 
 (*
@@ -953,8 +977,12 @@ let rec lookup (x:string) (c:ctxt) : int64 =
 *)
 
 let rec interpret (c:ctxt) (e:exp) : int64 =
-  failwith "unimplemented"
-
+  match e with
+    | Var(x) -> lookup x c
+    | Const(x) -> x
+    | Add(x, y) -> Int64.add (interpret c x) (interpret c y)
+    | Mult(x, y) -> Int64.mul (interpret c x) (interpret c y)
+    | Neg(x) -> Int64.neg (interpret c x)
 
 (*
   Problem 4-5
@@ -998,8 +1026,214 @@ let rec interpret (c:ctxt) (e:exp) : int64 =
   Hint: what simple optimizations can you do with Neg?
 *)
 
-let rec optimize (e:exp) : exp =
-  failwith "optimize unimplemented"
+(* negative literals to Neg *)
+
+let (|>) f g x = g (f x)
+
+let rec opt_pass_neg1 (e:exp) : exp =
+  match e with
+    | Var(s) -> Var(s)
+    | Const(i) when i < 0L -> Neg(Const(i))
+    | Const(i) -> Const(i)
+    | Add(Neg(x), Neg(y)) -> Neg(Add(opt_pass_neg1 x, opt_pass_neg1 y))
+    | Add(x, y) -> Add(opt_pass_neg1 x, opt_pass_neg1 y)
+    | Mult(Neg(x), Neg(y)) -> Mult(x, y) (* do this here because of next 2 cases *)
+    | Mult(Neg(x), y)
+    | Mult(x, Neg(y)) -> Neg(Mult(opt_pass_neg1 x, opt_pass_neg1 y))
+    | Mult(x, y) -> Mult(opt_pass_neg1 x, opt_pass_neg1 y)
+    | Neg(x) -> Neg(opt_pass_neg1 x)
+
+(* eliminate Neg *)
+let rec opt_pass_neg2 (e:exp) : exp =
+  match e with
+    | Neg(Neg(x)) -> opt_pass_neg2 x
+    | Neg(Const(x)) -> Const(Int64.neg x)
+    | Neg(x) -> Neg(opt_pass_neg2 x)
+    | Add(x, y) -> Add(opt_pass_neg2 x, opt_pass_neg2 y)
+    | Mult(x, y) -> Mult(opt_pass_neg2 x, opt_pass_neg2 y)
+    | e -> e
+
+let rec opt_pass_add (e:exp) : exp =
+  match e with
+    | Add(Const(0L), x)
+    | Add(x, Const(0L)) -> opt_pass_add x
+    | Add(Const(x), Const(y)) -> Const(Int64.add x y)
+    | Add(x, Neg(x')) when x = x' -> Const(0L)
+    | Add(Neg(x), x') when x = x' -> Const(0L)
+    | Add(x, Add(x', x'')) when x = x' && x' = x'' -> Mult(Const(3L), opt_pass_add x)
+    | Add(Add(x, x'), x'') when x = x' && x' = x'' -> Mult(Const(3L), opt_pass_add x)
+    | Add(Add(x, y), Add(z, w)) when x = y && y = z && z = w -> Mult(Const(4L), opt_pass_add x)
+    | Add(x, y) -> Add(opt_pass_add x, opt_pass_add y)
+    | Mult(x, y) -> Mult(opt_pass_add x, opt_pass_add y)
+    | Neg(x) -> Neg(opt_pass_add x)
+    | e -> e
+
+let rec opt_pass_mul (e:exp) : exp =
+  match e with
+    | Mult(_, Const(0L))
+    | Mult(Const(0L), _) -> Const(0L)
+    | Mult(Const(x), Const(y)) -> Const(Int64.mul x y)
+    | Mult(x, Neg(Const(1L)))
+    | Mult(Neg(Const(1L)), x)
+    | Mult(x, Const(-1L))
+    | Mult(Const(-1L), x) -> Neg(opt_pass_mul x)
+    | Mult(x, y) -> Mult(opt_pass_mul x, opt_pass_mul y)
+    | Add(x, y) -> Add(opt_pass_mul x, opt_pass_mul y)
+    | Neg(x) -> Neg(opt_pass_mul x)
+    | e -> e
+
+let rec opt_pass_other (u:unit) (ex:exp) : exp =
+  (* x^2 - (x + y)(x - y) = y^2 *)
+  let pass_binom1 e =
+    match e with
+      | Add(Mult(x, z), Neg(Mult(Add(w, y), Add(h, Neg(v)))))
+        when (x = z && z = w && w = h) && y = v -> Mult(y, y)
+      | Add(Mult(x, z), Mult(Neg(Add(w, y)), Add(h, Neg(v))))
+        when (x = z && z = w && w = h) && y = v -> Mult(y, y)
+      | Add(Mult(x, z), Mult(Add(w, y), Neg(Add(h, Neg(v)))))
+        when (x = z && z = w && w = h) && y = v -> Mult(y, y)
+      | Add(Mult(x, z), Mult(Add(w, y), Add(Neg(h), v)))
+        when (x = z && z = w && w = h) && y = v -> Mult(y, y)
+      | Add(Neg(Mult(Add(x, y), Add(z, Neg(v)))), Mult(w, h))
+        when (x = z && z = w && w = h) && y = v -> Mult(y, y)
+      | Add(Neg(Mult(Add(y, x), Add(z, Neg(v)))), Mult(w, h))
+        when (x = z && z = w && w = h) && y = v -> Mult(y, y)
+      | Add(Neg(Mult(Add(x, y), Add(Neg(v), z))), Mult(w, h))
+        when (x = z && z = w && w = h) && y = v -> Mult(y, y)
+      | Add(Neg(Mult(Add(y, x), Add(Neg(v), z))), Mult(w, h))
+        when (x = z && z = w && w = h) && y = v -> Mult(y, y)
+      | Add(Mult(x, z), Neg(Mult(Add(w, y), Add(h, Neg(v)))))
+        when (x = z && z = w && w = h) && y = v -> Mult(y, y)
+      | Add(Mult(x, z), Mult(Neg(Add(w, y)), Add(h, Neg(v))))
+        when (x = z && z = w && w = h) && y = v -> Mult(y, y)
+      | Add(Mult(x, z), Mult(Add(w, y), Neg(Add(h, Neg(v)))))
+        when (x = z && z = w && w = h) && y = v -> Mult(y, y)
+      | Add(Mult(x, z), Mult(Add(w, y), Add(Neg(h), v)))
+        when (x = z && z = w && w = h) && y = v -> Mult(y, y)
+      | e -> e
+  (* x^2 + 2xy + y^2 = (x + y)^2 *)
+  and pass_binom2 e =
+    match e with
+      | Add(Add(Mult(x, x'), Mult(y, y')), Mult(Mult(Const(2L), x''), y''))
+        when (x = x' && x = x'') && (y = y' && y = y'') -> Mult(Add(x, y), Add(x, y))
+      | Add(Add(Mult(x, x'), Mult(y, y')), Mult(Mult(x'', Const(2L)), y''))
+        when (x = x' && x = x'') && (y = y' && y = y'') -> Mult(Add(x, y), Add(x, y))
+      | Add(Add(Mult(x, x'), Mult(y, y')), Mult(Mult(y'', Const(2L)), x''))
+        when (x = x' && x = x'') && (y = y' && y = y'') -> Mult(Add(x, y), Add(x, y))
+      | Add(Add(Mult(x, x'), Mult(y, y')), Mult(Const(2L), Mult(x'', y'')))
+        when (x = x' && x = x'') && (y = y' && y = y'') -> Mult(Add(x, y), Add(x, y))
+      | Add(Add(Mult(x, x'), Mult(Mult(Const(2L), x''), y)), Mult(y', y''))
+        when (x = x' && x = x'') && (y = y' && y = y'') -> Mult(Add(x, y), Add(x, y))
+      | Add(Add(Mult(x, x'), Mult(Mult(x'', Const(2L)), y)), Mult(y', y''))
+        when (x = x' && x = x'') && (y = y' && y = y'') -> Mult(Add(x, y), Add(x, y))
+      | Add(Add(Mult(x, x'), Mult(Mult(y, Const(2L)), x'')), Mult(y', y''))
+        when (x = x' && x = x'') && (y = y' && y = y'') -> Mult(Add(x, y), Add(x, y))
+      | Add(Add(Mult(x, x'), Mult(Const(2L), Mult(x'', y))), Mult(y', y''))
+        when (x = x' && x = x'') && (y = y' && y = y'') -> Mult(Add(x, y), Add(x, y))
+      | e -> e
+  (* x^2 - 2xy + y^2 = (x - y)^2 *)
+  and pass_binom3 e =
+    match e with
+      | Add(Add(Mult(x, z), Mult(y, v)), Mult(Mult(Const(-2L), w), u))
+        when (x = z && z = w) && (y = v && v = u) -> Mult(Add(x, Neg(y)), Add(x, Neg(y)))
+      | Add(Add(Mult(x, z), Mult(y, v)), Mult(Mult(w, Const(-2L)), u))
+        when (x = z && z = w) && (y = v && v = u) -> Mult(Add(x, Neg(y)), Add(x, Neg(y)))
+      | Add(Add(Mult(x, z), Mult(y, v)), Mult(Mult(u, Const(-2L)), w))
+        when (x = z && z = w) && (y = v && v = u) -> Mult(Add(x, Neg(y)), Add(x, Neg(y)))
+      | Add(Add(Mult(x, z), Mult(y, v)), Mult(Const(-2L), Mult(w, u)))
+        when (x = z && z = w) && (y = v && v = u) -> Mult(Add(x, Neg(y)), Add(x, Neg(y)))
+      | Add(Add(Mult(x, z), Mult(Mult(Const(-2L), w), y)), Mult(v, u))
+        when (x = z && z = w) && (y = v && v = u) -> Mult(Add(x, Neg(y)), Add(x, Neg(y)))
+      | Add(Add(Mult(x, z), Mult(Mult(w, Const(-2L)), y)), Mult(v, u))
+        when (x = z && z = w) && (y = v && v = u) -> Mult(Add(x, Neg(y)), Add(x, Neg(y)))
+      | Add(Add(Mult(x, z), Mult(Mult(y, Const(-2L)), w)), Mult(v, u))
+        when (x = z && z = w) && (y = v && v = u) -> Mult(Add(x, Neg(y)), Add(x, Neg(y)))
+      | Add(Add(Mult(x, z), Mult(Const(-2L), Mult(w, y))), Mult(v, u))
+        when (x = z && z = w) && (y = v && v = u) -> Mult(Add(x, Neg(y)), Add(x, Neg(y)))
+      | e -> e
+  (* a*c + b*c = c*a + c*b = (a+b)*c *)
+  and pass_distributive e =
+    match e with
+      | Add(Mult(a, c), Mult(b, c'))
+        when c = c' -> Mult(Add(a, b), c)
+      | Add(Mult(b, c), Mult(a, c'))
+        when c = c' -> Mult(Add(a, b), c)
+      | Add(Mult(c, b), Mult(c', a))
+        when c = c' -> Mult(Add(a, b), c)
+      | Add(Mult(c, a), Mult(c', b))
+        when c = c' -> Mult(Add(a, b), c)
+      | e -> e
+  (* (const + x) + const = const' + x *)
+  and pass_symbadd e =
+    match e with
+      | Add(Add(Const(c1), x), Const(c2))
+      | Add(Const(c2), Add(Const(c1), x))
+      | Add(Add(x, Const(c1)), Const(c2))
+      | Add(Const(c2), Add(x, Const(c1))) -> Add((x, Const(Int64.add c1 c2)))
+      | e -> e
+  (* x - (x - y) = y *)
+  and pass_nestedinv e =
+    match e with
+      | Add(x, Add(x', Neg(y))) when x = x' -> y
+      | Add(Add(x, Neg(y)), x') when x = x' -> y
+      | e -> e
+  (* rest *)
+  and pass_recurse f e =
+    match e with
+      | Mult(x, y) -> Mult(f x, f y)
+      | Add(x, y) -> Add(f x, f y)
+      | Neg(x) -> Neg(f x)
+      | e -> e
+  in let pipeline =
+       pass_binom1
+    |> pass_binom2
+    |> pass_binom3
+    |> pass_distributive
+    |> pass_symbadd
+    |> pass_nestedinv
+    |> pass_recurse (opt_pass_other ())
+    in pipeline ex
+
+let rec optimize : exp -> exp =
+  (opt_pass_other ())
+  |> opt_pass_add
+  |> opt_pass_mul
+  |> opt_pass_neg1
+  |> opt_pass_neg2
+  |> opt_pass_add
+  |> opt_pass_mul
+  |> (opt_pass_other ())
+
+
+(* lt rec optimize (e:exp) : exp = *)
+  (* match e with *)
+    (* | Var(x) -> Var(x) *)
+    (* | Const(x) -> Const(x) *)
+    (* | Const(x) when x < 0L -> Neg(Const(x)) *)
+    (* | Add(Const(0L), x) *)
+    (* | Add(x, Const(0L)) -> optimize x *)
+    (* | Add(Const(x), Const(y)) -> Const(Int64.add x y) *)
+    (* | Add(Neg(Const(x)), Const(y)) -> Const(Int64.sub y x) *)
+    (* | Add(Const(x), Neg(Const(y))) -> Const(Int64.sub x y) *)
+    (* | Add(Neg(Const(x)), Neg(Const(y))) -> Const(Int64.neg @@ Int64.add x y) *)
+    (* | Add(x, Neg(y)) when x = y -> Const(0L) *)
+    (* | Add(Neg(x), y) when x = y -> Const(0L) *)
+    (* | Add(x, y) -> optimize @@ Add(optimize x, optimize y) *)
+    (* | Mult(_, Const(0L)) *)
+    (* | Mult(Const(0L), _) -> Const(0L) *)
+    (* | Mult(Const(x), Const(y)) -> Const(Int64.mul x y) *)
+    (* | Mult(x, Neg(Const(1L))) *)
+    (* | Mult(Neg(Const(1L)), x) *)
+    (* | Mult(x, Const(-1L)) *)
+    (* | Mult(Const(-1L), x) -> optimize @@ Neg(optimize x) *)
+    (* | Mult(x, y) -> optimize @@ Mult(optimize x, optimize y) *)
+    (* | Neg(Neg(x)) -> optimize @@ x *)
+    (* | Neg(Const(0L)) -> Const(0L) *)
+    (* | Neg(Const(x)) -> Const(Int64.neg x) *)
+    (* | Neg(Add(x, y)) -> optimize @@ Add(optimize @@ Neg(x), optimize @@ Neg(y)) *)
+    (* | Neg(Mult(x, y)) -> optimize @@ Mult(optimize @@ Neg(x), optimize y) *)
+    (* | Neg(x) -> Neg(optimize x)s *)
+    (* | e -> e *)
 
 
 (******************************************************************************)
@@ -1142,9 +1376,14 @@ let ans1 = run [] p1
 
    - You should test the correctness of your compiler on several examples.
 *)
-let rec compile (e:exp) : program =
-  failwith "compile unimplemented"
 
+let rec compile (e:exp) : program =
+  match e with
+    | Var(x) -> [IPushV(x)]
+    | Const(x) -> [IPushC(x)]
+    | Add(x, y) -> (compile x) @ (compile y) @ [IAdd]
+    | Mult(x, y) -> (compile x) @ (compile y) @ [IMul]
+    | Neg(x) -> (compile x) @ [INeg]
 
 
 (************)
