@@ -158,7 +158,11 @@ let interp_cnd {fo; fs; fz} : cnd -> bool = fun x ->
 (* Maps an X86lite address into Some OCaml array index,
    or None if the address is not within the legal address space. *)
 let map_addr (addr:quad) : int option =
-failwith "map_addr not implemented"
+  let open Int64 in
+  match sub addr mem_bot with
+    | i when (compare i 0L) <= -1 -> None
+    | i when i >= (sub mem_top mem_bot) -> None
+    | i -> Some (to_int i)
 
 (* Simulates one step of the machine:
     - fetch the instruction at %rip
