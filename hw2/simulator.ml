@@ -416,6 +416,12 @@ let i_cmp (m:mach) (os:operand list) : flags * retval list =
     ; fz = default_zero v
     }, [])
 
+let apply_machinestate (m:mach) (re:retval) : unit =
+  match re with
+  | Neither -> ()
+  | Register (r, v) -> reg_write m r v
+  | Memory (addr, bs) -> mem_write m addr bs
+
 (* group by arity, compute source/dest inside the simulation *)
 (* each simulation group returns flag triple and a list of dest vals needing update *)
 let rec simulate_inst (m:mach) (o:opcode) (os:operand list) : flags * retval list =
@@ -458,26 +464,30 @@ let rec simulate_inst (m:mach) (o:opcode) (os:operand list) : flags * retval lis
   | Retq -> simulate_inst m Popq [Reg Rip]
 and i_push_retard (m:mach) (os:operand list) : flags * retval list =
   let f = old_flags m in
-  let (_, l1) = simulate_inst m Decq [Reg Rsp] in
-  let (_, l2) = simulate_inst m Decq [Reg Rsp] in
-  let (_, l3) = simulate_inst m Decq [Reg Rsp] in
-  let (_, l4) = simulate_inst m Decq [Reg Rsp] in
-  let (_, l5) = simulate_inst m Decq [Reg Rsp] in
-  let (_, l6) = simulate_inst m Decq [Reg Rsp] in
-  let (_, l7) = simulate_inst m Decq [Reg Rsp] in
-  let (_, l8) = simulate_inst m Decq [Reg Rsp] in
+  let (_, [l1]) = simulate_inst m Decq [Reg Rsp] in
+  let _ = apply_machinestate m l1 in
+  let (_, [l2]) = simulate_inst m Decq [Reg Rsp] in
+  let _ = apply_machinestate m l2 in
+  let (_, [l3]) = simulate_inst m Decq [Reg Rsp] in
+  let _ = apply_machinestate m l3 in
+  let (_, [l4]) = simulate_inst m Decq [Reg Rsp] in
+  let _ = apply_machinestate m l4 in
+  let (_, [l5]) = simulate_inst m Decq [Reg Rsp] in
+  let _ = apply_machinestate m l5 in
+  let (_, [l6]) = simulate_inst m Decq [Reg Rsp] in
+  let _ = apply_machinestate m l6 in
+  let (_, [l7]) = simulate_inst m Decq [Reg Rsp] in
+  let _ = apply_machinestate m l7 in
+  let (_, [l8]) = simulate_inst m Decq [Reg Rsp] in
+  let _ = apply_machinestate m l8 in
   let (_, l9) = simulate_inst m Movq (os @ [Ind2 Rsp]) in
-  (f, l1 @ l2 @ l3 @ l4 @ l5 @ l6 @ l7 @ l8 @ l9)
+  (f, l9)
 
-(* Simulates one step of the machine:
-    - fetch the instruction at %rip
-    - compute the source and/or destination information from the operands
-    - simulate the instruction semantics
-    - update the registers and/or memory appropriately
-    - set the condition flags
-*)
+(* Simulates one step of the machine *)
 let step (m:mach) : unit =
+  (* fetch next instruction *)
   let mem_conts : sbyte list = mem_read_atreg m Rip in
+  (* simulate it *)
   let (newflags, newvals) : flags * retval list =
     match List.hd mem_conts with
     | InsFrag -> failwith "not an instruction byte: got InsFrag"
@@ -485,20 +495,14 @@ let step (m:mach) : unit =
     | InsB0 (oc, ops) -> simulate_inst m oc ops
   in
     (* according to type, update appropriate dest memory or register *)
-    List.iter (begin
-      fun n -> match n with
-      | Neither -> ()
-      | Register (r, v) -> reg_write m r v
-      | Memory (addr, bs) -> mem_write m addr bs
-    end) newvals;
+    List.iter (apply_machinestate m) newvals;
     (* set flags *)
     update_flags m newflags;
     (* advance Rip *)
     reg_write m Rip @@ Int64.add (reg_read m Rip) (Int64.of_int ins_size)
 
-(* Runs the machine until the rip register reaches a designated
-   memory address. Returns the contents of %rax when the 
-   machine halts. *)
+(* Runs the machine until the rip register reaches a designated memory address *)
+(* Returns the contents of %rax when the machine halts *)
 let run (m:mach) : int64 =
   while reg_read m Rip <> exit_addr do step m done;
   reg_read m Rax
