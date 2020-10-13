@@ -537,8 +537,159 @@ exception Redefined_sym of lbl
 
   HINT: List.fold_left and List.fold_right are your friends.
  *)
+
+(* - The text_seg and data_seg fields of the executable should consist of the serialized contents of the Text and Data sections of the assembly program in the order that they appear, without any padding (use sbytes_of_ins and sbytes_of_data) *)
+(* - The text_pos field must be exactly 0x400000 *)
+(* - The data_pos field must contain the address immediately following the end of the text segment *)
+(* - The entry field must contain the address of the first instruction after the label "main" in the assembly program *)
+(* - The assemble function should raise an Undefined_symbol exception if it encounters a label that is not declared in the source program, or if "main" is not declared *)
+
+(* - calculate the address where text and data should be loaded *)
+(* - Then, to resolve forward references to labels, traverse the assembly program and construct a symbol table to record the absolute address of each label definition you encounter *)
+(* - Then traverse the assembly program a second time, outputting sbytes for each instruction and data element encountered, using the symbol table to replace labels, which can occur in instruction operands or Quad data, with their addresses *)
+
+open Asm
+
+let istext (e:elem) : bool = match e with
+  | {asm = Text _ } -> true
+  | _ -> false
+
+let gettext (e:elem) : ins list = match e with
+  | {asm = Text is } -> is
+  | _ -> failwith "gettext: not program Text"
+
+let isdata (e:elem) : bool = match e with
+  | {asm = Data _ } -> true
+  | _ -> false
+
+let getdata (e:elem) : data list = match e with
+  | {asm = Data ds } -> ds
+  | _ -> failwith "getdata: not program Data"
+
+let resolve_h tb (l:lbl) : quad =
+  if Hashtbl.mem tb l
+  then Hashtbl.find tb l
+  else raise (Undefined_sym l)
+
+let tf_text_tbl tb (o:operand) : operand =
+  match o with
+  | Imm (Lbl l) -> Imm (Lit (resolve_h tb l))
+  | Ind1 (Lbl l) -> Ind1 (Lit (resolve_h tb l))
+  | Ind3 (Lbl l, r) -> Ind3 (Lit (resolve_h tb l), r)
+  | o' -> o'
+
+let tf_text_dummy (o:operand) : operand =
+  match o with
+  | Imm (Lbl _) -> Imm (Lit 0L)
+  | Ind1 (Lbl _) -> Ind1 (Lit 0L)
+  | Ind3 (Lbl _, r) -> Ind3 (Lit 0L, r)
+  | o' -> o'
+
+let sbytes_of_ins_h f (op, args:ins) : sbyte list =
+  let args' = List.map f args in
+  [InsB0 (op, args'); InsFrag; InsFrag; InsFrag;
+   InsFrag; InsFrag; InsFrag; InsFrag]
+
+(* sbytes_of_ins, but replace the labels by dummy addresses inside text *)
+let sbytes_of_ins_d : ins -> sbyte list =
+  sbytes_of_ins_h tf_text_dummy
+
+let sbytes_of_ins_tbl tb : ins -> sbyte list =
+  sbytes_of_ins_h (tf_text_tbl tb)
+
+(* sbytes_of_data, but replace the labels by dummy addresses inside data *)
+let sbytes_of_data_d : data -> sbyte list = function
+  | Quad (Lit i) -> sbytes_of_int64 i
+  | Asciz s -> sbytes_of_string s
+  | Quad (Lbl _) -> sbytes_of_int64 0L
+
+let sbytes_of_data_tbl tb (d:data) : sbyte list =
+  match d with
+  | Quad (Lit i) -> sbytes_of_int64 i
+  | Asciz s -> sbytes_of_string s
+  | Quad (Lbl l) -> sbytes_of_int64 (resolve_h tb l)
+
+(* e => [ins/data ins/data ins/data] => [[sb] [sb] [sb]] => [sb sb sb] => i *)
+let l_of_h f g e =
+  Int64.of_int @@ List.length @@ List.concat @@ (List.map f) @@ g e
+
+let l_of_elem (e:elem) : quad =
+  if istext e
+  then l_of_h sbytes_of_ins_d gettext e
+  else l_of_h sbytes_of_data_d getdata e
+
+(* gives the length in bytes *)
+let calc_len_h f (p:prog) : quad =
+  let all_relevant = List.map l_of_elem @@ List.filter f p in
+  List.fold_left Int64.add 0L all_relevant
+
+let calc_text_len : prog -> quad =
+  calc_len_h istext
+
+let calc_data_len : prog -> quad =
+  calc_len_h isdata
+
+(* arranges text segments first, then data segments, preserving internal order *)
+let sorted_segs (p:prog) : prog =
+  let rec sorted_segs_h (p:prog) acc_text acc_data = match p with
+    | [] -> acc_text @ acc_data
+    | e::es ->
+      if istext e
+      then sorted_segs_h es (acc_text @ [e]) acc_data
+      else sorted_segs_h es acc_text (acc_data @ [e])
+  in
+    sorted_segs_h p [] []
+
+(* gets an arranged program, returns a symbol table *)
+let construct_symbtbl (p:prog) (start:quad) =
+  let tbl = Hashtbl.create 100 in
+  let record (l:lbl) : quad -> unit =
+    if Hashtbl.mem tbl l
+    then raise (Redefined_sym l)
+    else Hashtbl.add tbl l
+  in let getlbl (e:elem) : lbl =
+    let {lbl = l} = e in l
+  in let rec itr (p:prog) (acc:quad) : unit = match p with
+    | [] -> ()
+    | e::es ->
+      record (getlbl e) acc;
+      itr es (Int64.add acc (l_of_elem e))
+  in
+    itr p start;
+    tbl
+
+(* pretty print symbol table *)
+let pprint_symbtbl tb =
+  Hashtbl.iter (fun x y -> Printf.printf "%s -> %Lu\n" x y) tb
+
+let serialise_text (p:prog) tb : sbyte list =
+  let resolve (e:elem) : sbyte list =
+    let {asm = Text inss} = e in
+    List.concat @@ List.map (sbytes_of_ins_tbl tb) inss
+  in
+    List.concat @@ List.map resolve p
+
+let serialise_data (p:prog) tb : sbyte list =
+  let resolve (e:elem) : sbyte list =
+    let {asm = Data ds} = e in
+    List.concat @@ List.map (sbytes_of_data_tbl tb) ds
+  in
+    List.concat @@ List.map resolve p
+
+let calc_entry tbl : quad =
+  if Hashtbl.mem tbl "main" then () else raise (Undefined_sym "main");
+  Hashtbl.find tbl "main"
+
 let assemble (p:prog) : exec =
-failwith "assemble unimplemented"
+  let start = mem_bot in
+  let p' = sorted_segs p in
+  let tb = construct_symbtbl p' start in
+  { entry = calc_entry tb
+  ; text_pos = start
+  ; data_pos = Int64.add start (calc_text_len p')
+  ; text_seg = serialise_text (List.filter istext p') tb
+  ; data_seg = serialise_data (List.filter isdata p') tb
+  }
 
 (* Convert an object file into an executable machine state. 
     - allocate the mem array
