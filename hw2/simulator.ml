@@ -140,7 +140,7 @@ let sbytes_of_data : data -> sbyte list = function
      [if !debug_simulator then print_endline @@ string_of_ins u; ...]
 
 *)
-let debug_simulator = ref false
+let debug_simulator = ref true
 
 (* Interpret a condition code with respect to the given flags. *)
 let interp_cnd {fo; fs; fz} : cnd -> bool = fun x ->
@@ -360,7 +360,7 @@ let i_jmp (m:mach) (x:bool) (os:operand list) : flags * retval list =
   let (_, iv, _) = multi_dec_srcsrcdest m o
   in
     if x then
-      (old_flags m, [Register (Rip, iv)])
+      let iv' = Int64.sub iv 8L in (old_flags m, [Register (Rip, iv')])
     else
       (old_flags m, [])
 
@@ -454,7 +454,10 @@ let rec simulate_inst (m:mach) (o:opcode) (os:operand list) : flags * retval lis
   | Pushq -> i_push_retard m os
   | Popq -> i_pop m os
   | Cmpq -> i_cmp m os
-  | Jmp -> simulate_inst m Movq (os @ [Reg Rip])
+  | Jmp ->
+    let (_, iv, _) = multi_dec_srcsrcdest m (List.hd os) in
+    let os' = [Imm (Lit (Int64.sub iv 8L))] in
+    simulate_inst m Movq (os' @ [Reg Rip])
   (* concat the retval lists *)
   | Callq ->
     let f = old_flags m in
@@ -492,7 +495,11 @@ let step (m:mach) : unit =
     match List.hd mem_conts with
     | InsFrag -> failwith "not an instruction byte: got InsFrag"
     | Byte _ -> failwith "not an instruction byte: got raw Byte"
-    | InsB0 (oc, ops) -> simulate_inst m oc ops
+    | InsB0 (oc, ops) ->
+      if !debug_simulator then begin
+        print_endline @@ string_of_ins (oc, ops)
+      end;
+      simulate_inst m oc ops
   in
     (* according to type, update appropriate dest memory or register *)
     List.iter (apply_machinestate m) newvals;
@@ -504,7 +511,7 @@ let step (m:mach) : unit =
 (* Runs the machine until the rip register reaches a designated memory address *)
 (* Returns the contents of %rax when the machine halts *)
 let run (m:mach) : int64 =
-  while reg_read m Rip <> exit_addr do step m done;
+  while reg_read m Rip <> (Int64.add exit_addr 8L) do step m done;
   reg_read m Rax
 
 (* assembling and linking --------------------------------------------------- *)
@@ -677,8 +684,9 @@ let serialise_data (p:prog) tb : sbyte list =
     List.concat @@ List.map resolve p
 
 let calc_entry tbl : quad =
-  if Hashtbl.mem tbl "main" then () else raise (Undefined_sym "main");
-  Hashtbl.find tbl "main"
+  if Hashtbl.mem tbl "main"
+  then Hashtbl.find tbl "main"
+  else raise (Undefined_sym "main")
 
 let assemble (p:prog) : exec =
   let start = mem_bot in
