@@ -704,5 +704,18 @@ let assemble (p:prog) : exec =
   Hint: The Array.make, Array.blit, and Array.of_list library functions 
   may be of use.
 *)
-let load {entry; text_pos; data_pos; text_seg; data_seg} : mach = 
-failwith "load unimplemented"
+let load {entry; text_pos; data_pos; text_seg; data_seg} : mach =
+  let mem = Array.make mem_size (Byte '\x00') in
+  let regs = Array.make nregs 0L in
+  Array.blit (Array.of_list text_seg) 0 mem (Option.get @@ map_addr text_pos) (List.length text_seg);
+  Array.blit (Array.of_list data_seg) 0 mem (Option.get @@ map_addr data_pos) (List.length data_seg);
+  regs.(rind Rip) <- entry;
+  regs.(rind Rsp) <- Int64.sub mem_top 8L;
+  let m =
+    { flags = {fo = false; fs = false; fz = false}
+    ; regs = regs
+    ; mem = mem
+    }
+  in
+    apply_machinestate m (Memory (reg_read m Rsp, sbytes_of_int64 exit_addr));
+  m
