@@ -1,14 +1,17 @@
+OTHER := gradedtests.ml studenttests.ml main.ml
+SUBMIT := backend.ml team.txt
+
 all: main.native
 
 .PHONY: test
 test: main.native
 	./main.native --test
 
-main.native:
-	ocamlbuild -Is util,x86,ll,grading -libs unix,str,nums main.native -use-menhir
+main.native: $(OTHER) $(SUBMIT)
+	ocamlbuild -Is util,x86,ll,grading -libs unix,str main.native -use-menhir -pkg num
 
-main.byte:
-	ocamlbuild -Is util,x86,ll,grading -libs unix,str,nums main.byte -use-menhir
+main.byte: $(OTHER) $(SUBMIT)
+	ocamlbuild -Is util,x86,ll,grading -libs unix,str main.byte -use-menhir -pkg num
 
 .PHONY: utop repl
 utop: main.byte
