@@ -139,8 +139,15 @@ let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
    - Void, i8, and functions have undefined sizes according to LLVMlite.
      Your function should simply return 0 in those cases
 *)
+let sum l = List.fold_left (+) 0 l
+
 let rec size_ty (tdecls:(tid * ty) list) (t:Ll.ty) : int =
-failwith "size_ty not implemented"
+  match t with
+    | Void | I8 | Fun _ -> 0
+    | I1 | I64 | Ptr _ -> 8
+    | Struct tlist -> sum (List.map (size_ty tdecls) tlist)
+    | Array (l, t) -> l * (size_ty tdecls t)
+    | Namedt tid -> size_ty tdecls (lookup tdecls tid)
 
 
 
@@ -251,7 +258,14 @@ let compile_lbl_block fn lbl ctxt blk : elem =
    [ NOTE: the first six arguments are numbered 0 .. 5 ]
 *)
 let arg_loc (n : int) : operand =
-failwith "arg_loc not implemented"
+  match n with
+    | 0 -> Reg Rdi
+    | 1 -> Reg Rsi
+    | 2 -> Reg Rdx
+    | 3 -> Reg Rcx
+    | 4 -> Reg R08
+    | 5 -> Reg R09
+    | i -> let displacement = ((i - 7) + 2) * 8 in Ind3(Lit (Int64.of_int displacement), Rbp)
 
 
 (* We suggest that you create a helper function that computes the
@@ -264,7 +278,8 @@ failwith "arg_loc not implemented"
 
 *)
 let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
-failwith "stack_layout not implemented"
+failwith "stack_layout unimplemented"
+
 
 (* The code for the entry-point of a function must do several things:
 
