@@ -15,7 +15,7 @@ main.byte: $(OTHER) $(SUBMIT)
 
 .PHONY: utop repl
 utop: main.byte
-	utop -require unix,str,num
+	utop -init .ocamlinit.ml -require unix,str,num
 
 repl: utop
 
