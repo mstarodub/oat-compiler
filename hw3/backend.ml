@@ -240,7 +240,14 @@ let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
    [blk]  - LLVM IR code for the block
 *)
 let compile_block (fn:string) (ctxt:ctxt) (blk:Ll.block) : ins list =
-  failwith "compile_block not implemented"
+  (* TODO: This is just a temporary implementation, it doesn't actually work *)
+  let { insns; term} = blk in
+  let { tdecls; layout} = ctxt in
+  let locals_size = (List.length layout) * 8 in
+  let open Asm in
+  match term with
+    | (uid, Ret (ty, op)) -> [Addq, [~$locals_size; ~%Rsp]; Retq, []]
+    | _ -> failwith "compile_block not implemented"
 
 let compile_lbl_block fn lbl ctxt blk : elem =
   Asm.text (mk_lbl fn lbl) (compile_block fn ctxt blk)
@@ -265,7 +272,7 @@ let arg_loc (n : int) : operand =
     | 3 -> Reg Rcx
     | 4 -> Reg R08
     | 5 -> Reg R09
-    | i -> let displacement = ((i - 7) + 2) * 8 in Ind3(Lit (Int64.of_int displacement), Rbp)
+    | i -> let displacement = ((i - 6) + 2) * 8 in Ind3(Lit (Int64.of_int displacement), Rbp)
 
 
 (* We suggest that you create a helper function that computes the
@@ -277,8 +284,19 @@ let arg_loc (n : int) : operand =
    - see the discussion about locals
 
 *)
+let extract_uids ({ insns; term }:block) : uid list =
+  List.split insns |> fst
+
 let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
-failwith "stack_layout unimplemented"
+  let all_blocks = List.split lbled_blocks |> snd |> List.cons block in
+  let all_uids = List.map extract_uids all_blocks |> List.flatten |> (@) args in
+
+  let calc_offset n = (-8) * (n + 1) |> Int64.of_int in
+  let offset_to_operand o = Ind3(Lit o, Rbp) in
+  let offsets = List.init (List.length all_uids) calc_offset in
+  let operands = List.map offset_to_operand offsets in
+  
+  List.combine all_uids operands
 
 
 (* The code for the entry-point of a function must do several things:
@@ -298,7 +316,41 @@ failwith "stack_layout unimplemented"
      to hold all of the local stack slots.
 *)
 let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_ty; f_param; f_cfg }:fdecl) : prog =
-failwith "compile_fdecl unimplemented"
+  let layout = stack_layout f_param f_cfg in
+  let ctxt = { tdecls; layout } in
+
+  (* Calculate stack frame size *)
+  let locals_size = (List.length layout) * 8 in
+
+  (* Move function parameters into corresponding stack slots *)
+  let params = List.combine (List.init (List.length f_param) Fun.id) f_param in
+  let f (n, uid) = (Movq, [arg_loc n; lookup layout uid]) in
+  let param_moves = List.map f params in
+
+  (* Construct function prelude *)
+  let function_prelude : ins list =
+    let open Asm in
+    [ Pushq, [~%Rbp]
+    ; Movq, [~%Rsp; ~%Rbp]
+    ; Subq, [~$locals_size; ~%Rsp]
+    ] @ param_moves
+  in
+
+  (* Compile first block and append to function prelude *)
+  let (fblock, lbled_blocks) = f_cfg in
+  let fblock_prog = compile_block name ctxt fblock in
+  let progtext = function_prelude @ fblock_prog in
+  let elem = {
+    lbl = name;
+    global = true;
+    asm = Text progtext;
+  } in
+
+  (* Compile labeled blocks *)
+  let g (lbl, block) = compile_lbl_block name lbl ctxt block in
+  let compiled_blocks = List.map g lbled_blocks in
+
+  elem :: compiled_blocks
 
 
 
