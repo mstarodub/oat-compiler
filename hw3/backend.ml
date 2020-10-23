@@ -212,7 +212,7 @@ let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
 
 (* compiling terminators  --------------------------------------------------- *)
 
-(* prefix the function name [fn] to a label to ensure that the X86 labels are 
+(* prefix the function name [fn] to a label to ensure that the X86 labels are
    globally unique . *)
 let mk_lbl (fn:string) (l:string) = fn ^ "." ^ l
 
@@ -234,7 +234,7 @@ let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
 
 (* compiling blocks --------------------------------------------------------- *)
 
-(* We have left this helper function here for you to complete. 
+(* We have left this helper function here for you to complete.
    [fn] - the name of the function containing this block
    [ctxt] - the current context
    [blk]  - LLVM IR code for the block
@@ -295,7 +295,7 @@ let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
   let offset_to_operand o = Ind3(Lit o, Rbp) in
   let offsets = List.init (List.length all_uids) calc_offset in
   let operands = List.map offset_to_operand offsets in
-  
+
   List.combine all_uids operands
 
 
@@ -324,8 +324,11 @@ let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_ty; f_param; f_cfg
 
   (* Move function parameters into corresponding stack slots *)
   let params = List.combine (List.init (List.length f_param) Fun.id) f_param in
-  let f (n, uid) = (Movq, [arg_loc n; lookup layout uid]) in
-  let param_moves = List.map f params in
+  let f (n, uid) = [
+    (Movq, [arg_loc n; Reg R09]);
+    (Movq, [Reg R09; lookup layout uid])
+  ] in
+  let param_moves = List.map f params |> List.concat in
 
   (* Construct function prelude *)
   let function_prelude : ins list =
