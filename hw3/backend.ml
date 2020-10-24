@@ -89,14 +89,19 @@ let lookup m x = List.assoc x m
    the X86 instruction that moves an LLVM operand into a designated
    destination (usually a register).
 *)
-let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
+let interm_mov (o:operand) (dest:operand) = [
+  (Movq, [o; Reg R09]);
+  (Movq, [Reg R09; dest])
+]
+
+let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins list =
   let { tdecls; layout} = ctxt in
   let open Asm in
   function ll_op -> match ll_op with
-    | Null -> (Movq, [~$0; dest])
-    | Const i -> (Movq, [Imm (Lit i); dest])
+    | Null -> [(Movq, [~$0; dest])]
+    | Const i -> [(Movq, [Imm (Lit i); dest])]
     | Gid g -> failwith "globals unimplemented"
-    | Id u -> (Movq, [lookup layout u; dest])
+    | Id u -> interm_mov (lookup layout u) dest
 
 
 
@@ -247,7 +252,7 @@ let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
   let jump_label lbl = [ Jmp, [~$$(mk_lbl fn lbl)] ] in
   let put_retval v = match v with
     | None -> []
-    | Some op -> [compile_operand ctxt ~%Rax op]
+    | Some op -> compile_operand ctxt ~%Rax op
   in match t with
   | Ret (tp, op_opt) -> (put_retval op_opt) @ stackframe_epilogue
 	(* lookup block associated with l in CFG, set is as current executing block *)
@@ -353,10 +358,7 @@ let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_ty; f_param; f_cfg
 
   (* Move function parameters into corresponding stack slots *)
   let params = List.combine (List.init (List.length f_param) Fun.id) f_param in
-  let f (n, uid) = [
-    (Movq, [arg_loc n; Reg R09]);
-    (Movq, [Reg R09; lookup layout uid])
-  ] in
+  let f (n, uid) = interm_mov (arg_loc n) (lookup layout uid) in
   let param_moves = List.map f params |> List.concat in
 
   (* Construct function prelude *)
