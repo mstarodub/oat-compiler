@@ -13,6 +13,23 @@ open X86
 
 (* helpers ------------------------------------------------------------------ *)
 
+let rec last xs =
+  match xs with
+  | [] -> failwith "last: no element"
+  | [x] -> x
+  | x::xs -> last xs
+let zip = List.combine
+let rec take n l =
+  match l with
+  | x::xs when n > 0 -> x :: (take (n-1) xs)
+  | _ -> []
+let rec drop n l =
+  match l with
+  | x::xs when n > 0 -> drop (n-1) xs
+  | _ -> l
+let replicate (n:int) (x:'a) : 'a list =
+  List.init n (fun y -> x)
+
 (* Map LL comparison operations to X86 condition codes *)
 let compile_cnd = function
   | Ll.Eq  -> X86.Eq
@@ -51,15 +68,30 @@ let compile_cnd = function
 *)
 
 type layout = (uid * X86.operand) list
+(* XXX: width; change to ty / type? *)
+type locals = (uid * int * X86.operand) list
 
 (* A context contains the global type declarations (needed for getelementptr
    calculations) and a stack layout. *)
 type ctxt = { tdecls : (tid * ty) list
             ; layout : layout
+            ; locals : locals
             }
 
 (* useful for looking up items in tdecls or layouts *)
 let lookup m x = List.assoc x m
+
+(* 3-elem assoc list helpers *)
+let rec lookup3 l i =
+  match l with
+  | [] -> failwith "lookup3: value error"
+  | (x, _, z)::xs -> if i = x then z else lookup3 xs i
+let rec zip3 l1 l2 l3 =
+  match (l1, l2, l3) with
+  | [], [], [] -> []
+  | h1::t1, h2::t2, h3::t3 -> (h1, h2, h3) :: (zip3 t1 t2 t3)
+  | _ -> failwith "zip3: mismatch"
+let snd3 (x, y, z) = y
 
 
 (* compiling operands  ------------------------------------------------------ *)
@@ -95,13 +127,13 @@ let interm_mov (o:operand) (dest:operand) = [
 ]
 
 let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins list =
-  let { tdecls; layout} = ctxt in
+  let { tdecls; layout; locals} = ctxt in
   let open Asm in
   function ll_op -> match ll_op with
     | Null -> [(Movq, [~$0; dest])]
     | Const i -> [(Movq, [Imm (Lit i); dest])]
     | Gid g -> failwith "globals unimplemented"
-    | Id u -> interm_mov (lookup layout u) dest
+    | Id u -> interm_mov (lookup3 locals u) dest
 
 
 
@@ -191,10 +223,10 @@ let rec size_ty (tdecls:(tid * ty) list) (t:Ll.ty) : int =
 let compile_gep (ctxt:ctxt) (op : Ll.ty * Ll.operand) (path: Ll.operand list) : ins list =
 failwith "compile_gep not implemented"
 
-let compile_bop (ctxt:ctxt) : Ll.bop -> ins list =
+let compile_bop (ll_bop:Ll.bop) : ins list =
 (* first arg in rax, second arg in rcx *)
   let open Asm in
-  function ll_bop -> let i = match ll_bop with
+  let i = match ll_bop with
     | Add -> Addq
     | Sub -> Subq
     | Mul -> Imulq
@@ -206,7 +238,7 @@ let compile_bop (ctxt:ctxt) : Ll.bop -> ins list =
     | Xor -> Xorq
     in [i, [~%Rcx; ~%Rax]]
 
-let compile_icmp ({ tdecls; layout }:ctxt) (cnd:Ll.cnd) (ty:Ll.ty) =
+let compile_icmp ({ tdecls; layout; locals }:ctxt) (cnd:Ll.cnd) (ty:Ll.ty) =
   let open Asm in
   if ty = I64 then
     let x86_cnd = compile_cnd cnd in
@@ -243,19 +275,19 @@ let compile_icmp ({ tdecls; layout }:ctxt) (cnd:Ll.cnd) (ty:Ll.ty) =
 
    - Bitcast: does nothing interesting at the assembly level
 *)
-let rax_to_local (l:layout) (uid:uid) : ins list =
+let rax_to_local (locals:locals) (uid:uid) : ins list =
   let open Asm in
-  [(Movq, [~%Rax; lookup l uid])]
+  [(Movq, [~%Rax; lookup3 locals uid])]
 
 (* XXX: puts the result into %rax. feasible for all cases ? *)
 let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
-  let { tdecls; layout} = ctxt in
+  let { tdecls; layout; locals} = ctxt in
   begin match i with
     | Binop (bi, ty, op1, op2)
       -> if ty <> I64 then failwith "BOP only defined for I64 values" else
         compile_operand ctxt (Reg Rax) op1
        @ compile_operand ctxt (Reg Rcx) op2
-       @ compile_bop ctxt bi
+       @ compile_bop bi
     | Alloca ty
       -> failwith "unimplemented Alloca instruction"
     | Load (ty, op)
@@ -273,7 +305,7 @@ let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
     | Gep (ty, op, opl)
       -> failwith "unimplemented Gep instruction"
   end
-  @ rax_to_local layout uid
+  @ rax_to_local locals uid
 
 
 (* compiling terminators  --------------------------------------------------- *)
@@ -294,13 +326,21 @@ let mk_lbl (fn:string) (l:string) = fn ^ "." ^ l
 
    [fn] - the name of the function containing this terminator
 *)
+
+let stack_layout_size (layout:layout) =
+  (List.length layout) * 8
+
+let stack_locals_size (tdecls:(tid * ty) list) (locals:locals) =
+  (* List.map (fun (x,y,z) -> size_ty tdecls y) locals |> sum *)
+  List.map snd3 locals |> sum
+
 (* XXX: how do we return aggregate types? *)
 let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
-  let { tdecls; layout} = ctxt in
-  let locals_size = (List.length layout) * 8 in
+  let { tdecls; layout; locals} = ctxt in
+  let stackframe_size = stack_layout_size layout + stack_locals_size tdecls locals in
   let open Asm in
   let stackframe_epilogue = [
-    (Addq, [~$locals_size; ~%Rsp]);
+    (Addq, [~$stackframe_size; ~%Rsp]);
     (Popq, [~%Rbp]);
     (Retq, [])
   ] in
@@ -319,7 +359,7 @@ let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
     | Null -> jump_label l2
     | Const i -> if i = 1L then jump_label l1 else jump_label l2
     | Gid g -> failwith "globals unimplemented"
-    | Id u -> [ Cmpq, [~$1; lookup layout u]
+    | Id u -> [ Cmpq, [~$1; lookup3 locals u]
               ; J Neq, [~$$(mk_lbl fn l2)]
               ; Jmp, [~$$(mk_lbl fn l1)]
               ]
@@ -335,7 +375,7 @@ let compile_block (fn:string) (ctxt:ctxt) (blk:Ll.block) : ins list =
   (* TODO: This is just a temporary implementation, it doesn't actually work *)
   (* XXX: what is the uid for ? *)
   let { insns = insns; term = (uid, term)} = blk in
-  let { tdecls; layout} = ctxt in
+  let { tdecls; layout; locals} = ctxt in
   (List.map (compile_insn ctxt) insns |> List.concat)
   @ compile_terminator fn ctxt term
 
@@ -377,16 +417,42 @@ let arg_loc (n : int) : operand =
 let extract_uids ({ insns; term }:block) : uid list =
   List.split insns |> fst
 
-let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
+let extract_insns ({ insns; term }:block) : insn list =
+  List.split insns |> snd
+
+let eightbyte_align (i:int) : int =
+  let ov = if (i mod 8) <> 0 then 1 else 0 in
+  (i / 8) * 8 + ov * 8
+
+let size_ty_ofins_align (tdecls:(tid * ty) list) (i:insn) : int =
+  let t = match i with
+    | Binop _ -> I64
+    | Alloca ty -> ty
+    | Load (Ptr ty, _) -> ty
+    | Store _ -> Void
+    | Icmp _ -> I1
+    | Call (Fun (_, ty), _, _) -> ty
+    | Bitcast (_, _, ty) -> ty
+    | Gep (ty, op, opl) -> failwith "unimplemented Gep instruction"
+    | _ -> failwith "malformed insn"
+  in size_ty tdecls t |> eightbyte_align
+
+let stack_layout (tdecls:(tid * ty) list) (args : uid list) ((block, lbled_blocks):cfg) : layout * locals =
   let all_blocks = List.split lbled_blocks |> snd |> List.cons block in
-  let all_uids = List.map extract_uids all_blocks |> List.flatten |> (@) args in
-
-  let calc_offset n = (-8) * (n + 1) |> Int64.of_int in
   let offset_to_operand o = Ind3(Lit o, Rbp) in
-  let offsets = List.init (List.length all_uids) calc_offset in
-  let operands = List.map offset_to_operand offsets in
 
-  List.combine all_uids operands
+  (* args *)
+  let calc_offsets_args n = (-8) * (n + 1) |> Int64.of_int in
+  let offsets_args = List.init (List.length args) calc_offsets_args in
+  let operands_args = List.map offset_to_operand offsets_args in
+
+  (* locals *)
+  let all_local_uids = List.map extract_uids all_blocks |> List.flatten in
+  let all_local_width = List.map extract_insns all_blocks |> List.flatten |> List.map (size_ty_ofins_align tdecls) in
+  let offsets_locals = List.map ((-) (last offsets_args |> Int64.to_int)) all_local_width in
+  let operands_locals = List.map offset_to_operand (List.map Int64.of_int offsets_locals) in
+
+  (zip args operands_args, zip3 all_local_uids all_local_width operands_locals)
 
 
 (* The code for the entry-point of a function must do several things:
@@ -406,11 +472,11 @@ let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
      to hold all of the local stack slots.
 *)
 let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_ty; f_param; f_cfg }:fdecl) : prog =
-  let layout = stack_layout f_param f_cfg in
-  let ctxt = { tdecls; layout } in
+  let layout, locals = stack_layout tdecls f_param f_cfg in
+  let ctxt = { tdecls; layout; locals} in
 
   (* Calculate stack frame size *)
-  let locals_size = (List.length layout) * 8 in
+  let stackframe_size = stack_layout_size layout + stack_locals_size tdecls locals in
 
   (* Move function parameters into corresponding stack slots *)
   let params = List.combine (List.init (List.length f_param) Fun.id) f_param in
@@ -422,7 +488,7 @@ let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_ty; f_param; f_cfg
     let open Asm in
     [ Pushq, [~%Rbp]
     ; Movq, [~%Rsp; ~%Rbp]
-    ; Subq, [~$locals_size; ~%Rsp]
+    ; Subq, [~$stackframe_size; ~%Rsp]
     ] @ param_moves
   in
 

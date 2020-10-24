@@ -57,14 +57,14 @@ type cnd =
 
 (* Instructions *)
 type insn =
-| Binop of bop * ty * operand * operand
-| Alloca of ty
-| Load of ty * operand
-| Store of ty * operand * operand
-| Icmp of cnd * ty * operand * operand
-| Call of ty * operand * (ty * operand) list
-| Bitcast of ty * operand * ty
-| Gep of ty * operand * operand list
+| Binop of bop * ty * operand * operand (* : I64 *)
+| Alloca of ty (* : ty *)
+| Load of ty * operand (* : dereferenced ty *)
+| Store of ty * operand * operand (* : Void *)
+| Icmp of cnd * ty * operand * operand (* : I1 *)
+| Call of ty * operand * (ty * operand) list (* : result of function type ty *)
+| Bitcast of ty * operand * ty (* : ty2 *)
+| Gep of ty * operand * operand list (* : GEP type *)
 
 type terminator =
 | Ret of ty * operand option
