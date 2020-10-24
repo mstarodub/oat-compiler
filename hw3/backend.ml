@@ -90,7 +90,13 @@ let lookup m x = List.assoc x m
    destination (usually a register).
 *)
 let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
-  function _ -> failwith "compile_operand unimplemented"
+  let { tdecls; layout} = ctxt in
+  let open Asm in
+  function ll_op -> match ll_op with
+    | Null -> (Movq, [~$0; dest])
+    | Const i -> (Movq, [Imm (Lit i); dest])
+    | Gid g -> failwith "globals unimplemented"
+    | Id u -> (Movq, [lookup layout u; dest])
 
 
 
@@ -230,7 +236,6 @@ let mk_lbl (fn:string) (l:string) = fn ^ "." ^ l
 *)
 (* XXX: how do we return aggregate types? *)
 let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
-  (* TODO: This is just a temporary implementation, it doesn't return values *)
   let { tdecls; layout} = ctxt in
   let locals_size = (List.length layout) * 8 in
   let open Asm in
@@ -239,20 +244,25 @@ let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
     (Popq, [~%Rbp]);
     (Retq, [])
   ] in
+  let jump_label lbl = [ Jmp, [~$$(mk_lbl fn lbl)] ] in
   let put_retval v = match v with
     | None -> []
-    | Some op -> failwith "return with value unimplemented"
+    | Some op -> [compile_operand ctxt ~%Rax op]
   in match t with
   | Ret (tp, op_opt) -> (put_retval op_opt) @ stackframe_epilogue
 	(* lookup block associated with l in CFG, set is as current executing block *)
 	(* XXX: lookup in here impossible, insert Imm Lbls ? *)
-  | Br l -> [(Jmp, [Imm (Lbl l)])]
+  | Br l -> jump_label l
   (* if op = 1 then jump to l1 else jump to l2 *)
+  (* TODO: Maybe replace this with compile_operand later? *)
   | Cbr (op, l1, l2) -> match op with
-    | Null -> [Jmp, [Imm (Lbl l2)]]
-    | Const i -> if i = 1L then [Jmp, [Imm (Lbl l1)]] else [Jmp, [Imm (Lbl l2)]]
+    | Null -> jump_label l2
+    | Const i -> if i = 1L then jump_label l1 else jump_label l2
     | Gid g -> failwith "globals unimplemented"
-    | Id u -> [(Cmpq, [~$1; lookup layout u]); (J Neq, [Imm (Lbl l2)]); Jmp, [Imm (Lbl l1)]]
+    | Id u -> [ Cmpq, [~$1; lookup layout u]
+              ; J Neq, [~$$(mk_lbl fn l2)]
+              ; Jmp, [~$$(mk_lbl fn l1)]
+              ]
 
 (* compiling blocks --------------------------------------------------------- *)
 
