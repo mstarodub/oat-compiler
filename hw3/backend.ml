@@ -191,6 +191,20 @@ let rec size_ty (tdecls:(tid * ty) list) (t:Ll.ty) : int =
 let compile_gep (ctxt:ctxt) (op : Ll.ty * Ll.operand) (path: Ll.operand list) : ins list =
 failwith "compile_gep not implemented"
 
+let compile_bop (ctxt:ctxt) : Ll.bop -> ins list =
+(* first arg in rax, second arg in rcx *)
+  let open Asm in
+  function ll_bop -> let i = match ll_bop with
+    | Add -> Addq
+    | Sub -> Subq
+    | Mul -> Imulq
+    | Shl -> Shlq
+    | Lshr -> Shrq
+    | Ashr -> Sarq
+    | And -> Andq
+    | Or -> Orq
+    | Xor -> Xorq
+    in [(i, [~%Rcx; ~%Rax])]
 
 
 (* compiling instructions  -------------------------------------------------- *)
@@ -216,9 +230,35 @@ failwith "compile_gep not implemented"
 
    - Bitcast: does nothing interesting at the assembly level
 *)
-let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
-      failwith "compile_insn not implemented"
+let rax_to_local (l:layout) (uid:uid) : ins list =
+  let open Asm in
+  [(Movq, [~%Rax; lookup l uid])]
 
+(* XXX: puts the result into %rax. feasible for all cases ? *)
+let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
+  let { tdecls; layout} = ctxt in
+  begin match i with
+    | Binop (bi, I64, op1, op2)
+      -> compile_operand ctxt (Reg Rax) op1
+       @ compile_operand ctxt (Reg Rcx) op2
+       @ compile_bop ctxt bi
+    | Binop (_, _, _, _) -> failwith "binary operations only defined for I64 values"
+    | Alloca ty
+      -> failwith "unimplemented"
+    | Load (ty, op)
+      -> failwith "unimplemented"
+    | Store (ty, op1, op2)
+      -> failwith "unimplemented"
+    | Icmp (cnd, ty, op1, op2)
+      -> failwith "unimplemented"
+    | Call (ty, op, argl)
+      -> failwith "unimplemented"
+    | Bitcast (ty1, op, ty2)
+      -> failwith "unimplemented"
+    | Gep (ty, op, opl)
+      -> failwith "unimplemented"
+  end
+  @ rax_to_local layout uid
 
 
 (* compiling terminators  --------------------------------------------------- *)
@@ -281,7 +321,8 @@ let compile_block (fn:string) (ctxt:ctxt) (blk:Ll.block) : ins list =
   (* XXX: what is the uid for ? *)
   let { insns = insns; term = (uid, term)} = blk in
   let { tdecls; layout} = ctxt in
-  compile_terminator fn ctxt term
+  (List.map (compile_insn ctxt) insns |> List.concat)
+  @ compile_terminator fn ctxt term
 
 let compile_lbl_block fn lbl ctxt blk : elem =
   Asm.text (mk_lbl fn lbl) (compile_block fn ctxt blk)
