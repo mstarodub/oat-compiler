@@ -228,9 +228,31 @@ let mk_lbl (fn:string) (l:string) = fn ^ "." ^ l
 
    [fn] - the name of the function containing this terminator
 *)
+(* XXX: how do we return aggregate types? *)
 let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
-  failwith "compile_terminator not implemented"
-
+  (* TODO: This is just a temporary implementation, it doesn't return values *)
+  let { tdecls; layout} = ctxt in
+  let locals_size = (List.length layout) * 8 in
+  let open Asm in
+  let stackframe_epilogue = [
+    (Addq, [~$locals_size; ~%Rsp]);
+    (Popq, [~%Rbp]);
+    (Retq, [])
+  ] in
+  let put_retval v = match v with
+    | None -> []
+    | Some op -> failwith "return with value unimplemented"
+  in match t with
+  | Ret (tp, op_opt) -> (put_retval op_opt) @ stackframe_epilogue
+	(* lookup block associated with l in CFG, set is as current executing block *)
+	(* XXX: lookup in here impossible, insert Imm Lbls ? *)
+  | Br l -> [(Jmp, [Imm (Lbl l)])]
+  (* if op = 1 then jump to l1 else jump to l2 *)
+  | Cbr (op, l1, l2) -> match op with
+    | Null -> [Jmp, [Imm (Lbl l2)]]
+    | Const i -> if i = 1L then [Jmp, [Imm (Lbl l1)]] else [Jmp, [Imm (Lbl l2)]]
+    | Gid g -> failwith "globals unimplemented"
+    | Id u -> [(Cmpq, [~$1; lookup layout u]); (J Neq, [Imm (Lbl l2)]); Jmp, [Imm (Lbl l1)]]
 
 (* compiling blocks --------------------------------------------------------- *)
 
@@ -241,13 +263,10 @@ let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
 *)
 let compile_block (fn:string) (ctxt:ctxt) (blk:Ll.block) : ins list =
   (* TODO: This is just a temporary implementation, it doesn't actually work *)
-  let { insns; term} = blk in
+  (* XXX: what is the uid for ? *)
+  let { insns = insns; term = (uid, term)} = blk in
   let { tdecls; layout} = ctxt in
-  let locals_size = (List.length layout) * 8 in
-  let open Asm in
-  match term with
-    | (uid, Ret (ty, op)) -> [Addq, [~$locals_size; ~%Rsp]; Retq, []]
-    | _ -> failwith "compile_block not implemented"
+  compile_terminator fn ctxt term
 
 let compile_lbl_block fn lbl ctxt blk : elem =
   Asm.text (mk_lbl fn lbl) (compile_block fn ctxt blk)
