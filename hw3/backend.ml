@@ -204,7 +204,20 @@ let compile_bop (ctxt:ctxt) : Ll.bop -> ins list =
     | And -> Andq
     | Or -> Orq
     | Xor -> Xorq
-    in [(i, [~%Rcx; ~%Rax])]
+    in [i, [~%Rcx; ~%Rax]]
+
+let compile_icmp ({ tdecls; layout }:ctxt) (cnd:Ll.cnd) (ty:Ll.ty) =
+  let open Asm in
+  if ty = I64 then
+    let x86_cnd = compile_cnd cnd in
+    [ Cmpq, [~%Rcx; ~%Rax]
+    (* Clear rax value (setb only sets lower byte) *)
+    ; Movq, [~$0; ~%Rax]
+    ; Set x86_cnd, [~%Rax]
+    ]
+  else
+    (* XXX: Does icmp compare aggregate values or only the pointers? *)
+    failwith "compile_icmp unimplemented for non-I64 values"
 
 
 (* compiling instructions  -------------------------------------------------- *)
@@ -244,19 +257,21 @@ let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
        @ compile_operand ctxt (Reg Rcx) op2
        @ compile_bop ctxt bi
     | Alloca ty
-      -> failwith "unimplemented"
+      -> failwith "unimplemented Alloca instruction"
     | Load (ty, op)
-      -> failwith "unimplemented"
+      -> failwith "unimplemented Load instruction"
     | Store (ty, op1, op2)
-      -> failwith "unimplemented"
+      -> failwith "unimplemented Store instruction"
     | Icmp (cnd, ty, op1, op2)
-      -> failwith "unimplemented"
+      -> compile_operand ctxt (Reg Rax) op1
+      @ compile_operand ctxt (Reg Rcx) op2
+      @ compile_icmp ctxt cnd ty
     | Call (ty, op, argl)
-      -> failwith "unimplemented"
+      -> failwith "unimplemented Call instruction"
     | Bitcast (ty1, op, ty2)
-      -> failwith "unimplemented"
+      -> []
     | Gep (ty, op, opl)
-      -> failwith "unimplemented"
+      -> failwith "unimplemented Gep instruction"
   end
   @ rax_to_local layout uid
 
