@@ -238,11 +238,11 @@ let rax_to_local (l:layout) (uid:uid) : ins list =
 let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
   let { tdecls; layout} = ctxt in
   begin match i with
-    | Binop (bi, I64, op1, op2)
-      -> compile_operand ctxt (Reg Rax) op1
+    | Binop (bi, ty, op1, op2)
+      -> if ty <> I64 then failwith "BOP only defined for I64 values" else
+        compile_operand ctxt (Reg Rax) op1
        @ compile_operand ctxt (Reg Rcx) op2
        @ compile_bop ctxt bi
-    | Binop (_, _, _, _) -> failwith "binary operations only defined for I64 values"
     | Alloca ty
       -> failwith "unimplemented"
     | Load (ty, op)
