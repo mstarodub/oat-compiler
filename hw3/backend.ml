@@ -217,8 +217,19 @@ failwith "compile_gep not implemented"
    - Bitcast: does nothing interesting at the assembly level
 *)
 let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
-      failwith "compile_insn not implemented"
-
+  let { tdecls; layout } = ctxt in
+  let dest = lookup layout uid in
+  let open Asm in
+  begin match i with
+    | Binop (bop, ty, op1, op2) -> if ty <> I64 then failwith "BOP of wrong type" else
+      begin match bop with
+        | Add -> compile_operand ctxt dest op1
+                  @ compile_operand ctxt ~%R09 op2
+                  @ [Addq, [~%R09; dest]]
+        | _ -> failwith "compile_insn not implemented"
+      end
+    | _ -> failwith "compile_insn not implemented"
+  end
 
 
 (* compiling terminators  --------------------------------------------------- *)
@@ -277,11 +288,11 @@ let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
    [blk]  - LLVM IR code for the block
 *)
 let compile_block (fn:string) (ctxt:ctxt) (blk:Ll.block) : ins list =
-  (* TODO: This is just a temporary implementation, it doesn't actually work *)
-  (* XXX: what is the uid for ? *)
+  (* XXX: what is the terminator uid for ? *)
   let { insns = insns; term = (uid, term)} = blk in
-  let { tdecls; layout} = ctxt in
-  compile_terminator fn ctxt term
+  let compiled_insns = List.map (compile_insn ctxt) insns |> List.flatten in
+  let compiled_terminator = compile_terminator fn ctxt term in
+  compiled_insns @ compiled_terminator
 
 let compile_lbl_block fn lbl ctxt blk : elem =
   Asm.text (mk_lbl fn lbl) (compile_block fn ctxt blk)
