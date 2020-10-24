@@ -269,7 +269,7 @@ let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
     | Call (ty, op, argl)
       -> failwith "unimplemented Call instruction"
     | Bitcast (ty1, op, ty2)
-      -> []
+      -> compile_operand ctxt (Reg Rax) op
     | Gep (ty, op, opl)
       -> failwith "unimplemented Gep instruction"
   end
