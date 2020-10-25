@@ -99,9 +99,9 @@ let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins list =
   let { tdecls; layout; frame_size } = ctxt in
   let open Asm in
   function ll_op -> match ll_op with
-    | Null -> [(Movq, [~$0; dest])]
-    | Const i -> [(Movq, [Imm (Lit i); dest])]
-    | Gid g -> [(Movq, [Imm (Lbl g); dest])]
+    | Null -> [Movq, [~$0; dest]]
+    | Const i -> [Movq, [Imm (Lit i); dest]]
+    | Gid g-> [Leaq, [Ind1 (Lbl (Platform.mangle g)); dest]]
     | Id u -> interm_mov (lookup layout u) dest
 
 
@@ -157,7 +157,7 @@ let compile_call (ctxt:ctxt) (ty:Ll.ty) (op:Ll.operand) (argl:(Ll.ty * Ll.operan
   let call = compile_operand ctxt (Reg Rax) op @ [(Callq, [Reg Rax])] in
 
   rsp_shift @ arg_moves @ call @ rsp_unshift
-  
+
 (* compiling getelementptr (gep)  ------------------------------------------- *)
 
 (* The getelementptr instruction computes an address by indexing into
@@ -290,11 +290,11 @@ let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
       -> [Movq, [lookup layout uid; Reg Rax]]
     | Load (ty, op)
       -> compile_operand ctxt (Reg Rax) op
-        @ [Movq, [Ind2 (Rax); Reg Rax]]
+        @ [Movq, [Ind2 Rax; Reg Rax]]
     | Store (ty, op1, op2)
       -> compile_operand ctxt (Reg Rax) op1
         @ compile_operand ctxt (Reg Rcx) op2
-        @ [Movq, [Reg Rax; Ind2 (Rcx)]]
+        @ [Movq, [Reg Rax; Ind2 Rcx]]
     | Icmp (cnd, ty, op1, op2)
       -> compile_operand ctxt (Reg Rax) op1
       @ compile_operand ctxt (Reg Rcx) op2
@@ -346,11 +346,13 @@ let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
 	(* XXX: lookup in here impossible, insert Imm Lbls ? *)
   | Br l -> jump_label l
   (* if op = 1 then jump to l1 else jump to l2 *)
-  (* TODO: Maybe replace this with compile_operand later? *)
   | Cbr (op, l1, l2) -> match op with
     | Null -> jump_label l2
     | Const i -> if i = 1L then jump_label l1 else jump_label l2
-    | Gid g -> failwith "globals unimplemented"
+    | Gid g -> [ Cmpq, [~$1; ~$$(Platform.mangle g)]
+               ; J Neq, [~$$(mk_lbl fn l2)]
+               ; Jmp, [~$$(mk_lbl fn l1)]
+               ]
     | Id u -> [ Cmpq, [~$1; lookup layout u]
               ; J Neq, [~$$(mk_lbl fn l2)]
               ; Jmp, [~$$(mk_lbl fn l1)]
@@ -422,19 +424,18 @@ let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
 
 let get_alloca_types (uid, insn) =
   match insn with
-    | Alloca ty -> [(uid, ty)] 
+    | Alloca ty -> [(uid, ty)]
     | _ -> []
 
-let rec partial_sums (l:int list) : int list =
-  match l with
-    | [] -> []
-    | x::xs -> x :: partial_sums (List.map ((+) x) xs)
+let rec scanl (f : 'b -> 'a -> 'b) (x : 'b) (xs : 'a list) : 'b list =
+  match xs with
+    | [] -> [x]
+    | l::ls -> x :: (scanl f (f x l) ls)
 
-let rec drop_last (l:'a list) : 'a list =
+let rec drop n l =
   match l with
-    | [] -> []
-    | [x] -> []
-    | x::xs -> x :: drop_last xs
+  | x::xs when n > 0 -> drop (n-1) xs
+  | _ -> l
 
 let mem_layout (tdecls:(tid * ty) list) (layout:layout) ((block, lbled_blocks):cfg) : int * (uid * int) list =
   let locals_size = (List.length layout) * 8 in
@@ -448,10 +449,8 @@ let mem_layout (tdecls:(tid * ty) list) (layout:layout) ((block, lbled_blocks):c
 
   let mem_size = sum widths in
   (* If widths of the types are e.g.  8, 24, 32,  8
-     then the offsets should be       0,  8, 32, 64
-     The offsets are calculated as the partial sums of the widths,
-     but prepended with a 0 and dropping the last element. *)
-  let offsets = partial_sums widths |> (@) [0] |> drop_last |> List.map ((+) locals_size) in
+     then the offsets should be      -8,-32,-64,-72 *)
+  let offsets = scanl (+) 0 widths |> drop 1 |> List.map ((+) locals_size) |> List.map Int.neg in
 
   (mem_size, List.combine uids offsets)
 
