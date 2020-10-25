@@ -56,6 +56,7 @@ type layout = (uid * X86.operand) list
    calculations) and a stack layout. *)
 type ctxt = { tdecls : (tid * ty) list
             ; layout : layout
+            ; frame_size : int
             }
 
 (* useful for looking up items in tdecls or layouts *)
@@ -95,7 +96,7 @@ let interm_mov (o:operand) (dest:operand) = [
 ]
 
 let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins list =
-  let { tdecls; layout} = ctxt in
+  let { tdecls; layout; frame_size } = ctxt in
   let open Asm in
   function ll_op -> match ll_op with
     | Null -> [(Movq, [~$0; dest])]
@@ -235,7 +236,7 @@ let compile_bop (ctxt:ctxt) : Ll.bop -> ins list =
     | Xor -> Xorq
     in [i, [~%Rcx; ~%Rax]]
 
-let compile_icmp ({ tdecls; layout }:ctxt) (cnd:Ll.cnd) (ty:Ll.ty) =
+let compile_icmp ({ tdecls; layout; frame_size }:ctxt) (cnd:Ll.cnd) (ty:Ll.ty) =
   let open Asm in
   match ty with
     | I1 | I8 | I64 | Ptr _
@@ -277,19 +278,23 @@ let rax_to_local (l:layout) (uid:uid) : ins list =
 
 (* XXX: puts the result into %rax. feasible for all cases ? *)
 let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
-  let { tdecls; layout} = ctxt in
+  let { tdecls; layout; frame_size } = ctxt in
   begin match i with
     | Binop (bi, ty, op1, op2)
       -> if ty <> I64 then failwith "BOP only defined for I64 values" else
         compile_operand ctxt (Reg Rax) op1
-       @ compile_operand ctxt (Reg Rcx) op2
-       @ compile_bop ctxt bi
+        @ compile_operand ctxt (Reg Rcx) op2
+        @ compile_bop ctxt bi
     | Alloca ty
-      -> failwith "unimplemented Alloca instruction"
+      (* Alloca doesn't actually have to do anything *)
+      -> [Movq, [lookup layout uid; Reg Rax]]
     | Load (ty, op)
-      -> failwith "unimplemented Load instruction"
+      -> compile_operand ctxt (Reg Rax) op
+        @ [Movq, [Ind2 (Rax); Reg Rax]]
     | Store (ty, op1, op2)
-      -> failwith "unimplemented Store instruction"
+      -> compile_operand ctxt (Reg Rax) op1
+        @ compile_operand ctxt (Reg Rcx) op2
+        @ [Movq, [Reg Rax; Ind2 (Rcx)]]
     | Icmp (cnd, ty, op1, op2)
       -> compile_operand ctxt (Reg Rax) op1
       @ compile_operand ctxt (Reg Rcx) op2
@@ -324,11 +329,10 @@ let mk_lbl (fn:string) (l:string) = fn ^ "." ^ l
 *)
 (* XXX: how do we return aggregate types? *)
 let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
-  let { tdecls; layout} = ctxt in
-  let locals_size = (List.length layout) * 8 in
+  let { tdecls; layout; frame_size } = ctxt in
   let open Asm in
   let stackframe_epilogue = [
-    (Addq, [~$locals_size; ~%Rsp]);
+    (Addq, [~$frame_size; ~%Rsp]);
     (Popq, [~%Rbp]);
     (Retq, [])
   ] in
@@ -363,7 +367,7 @@ let compile_block (fn:string) (ctxt:ctxt) (blk:Ll.block) : ins list =
   (* TODO: This is just a temporary implementation, it doesn't actually work *)
   (* XXX: what is the uid for ? *)
   let { insns = insns; term = (uid, term)} = blk in
-  let { tdecls; layout} = ctxt in
+  let { tdecls; layout; frame_size } = ctxt in
   (List.map (compile_insn ctxt) insns |> List.concat)
   @ compile_terminator fn ctxt term
 
@@ -416,6 +420,39 @@ let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
 
   List.combine all_uids operands
 
+let get_alloca_types (uid, insn) =
+  match insn with
+    | Alloca ty -> [(uid, ty)] 
+    | _ -> []
+
+let rec partial_sums (l:int list) : int list =
+  match l with
+    | [] -> []
+    | x::xs -> x :: partial_sums (List.map ((+) x) xs)
+
+let rec drop_last (l:'a list) : 'a list =
+  match l with
+    | [] -> []
+    | [x] -> []
+    | x::xs -> x :: drop_last xs
+
+let mem_layout (tdecls:(tid * ty) list) (layout:layout) ((block, lbled_blocks):cfg) : int * (uid * int) list =
+  let locals_size = (List.length layout) * 8 in
+
+  let all_blocks = List.split lbled_blocks |> snd |> List.cons block in
+  let all_insns = List.map (fun { insns; term } -> insns) all_blocks |> List.flatten in
+  let alloca_types = List.map get_alloca_types all_insns |> List.flatten in
+
+  let uid_widths = List.map (fun (uid, ty) -> (uid, size_ty tdecls ty)) alloca_types in
+  let (uids, widths) = List.split uid_widths in
+  let mem_size = sum widths in
+  let offsets = if List.length widths <> 0 then
+      partial_sums widths |> drop_last |> (@) [0] |> List.map ((+) locals_size)
+    else
+      []
+  in
+  (mem_size, List.combine uids offsets)
+
 
 (* The code for the entry-point of a function must do several things:
 
@@ -435,23 +472,29 @@ let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
 *)
 let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_ty; f_param; f_cfg }:fdecl) : prog =
   let layout = stack_layout f_param f_cfg in
-  let ctxt = { tdecls; layout } in
+  let (mem_size, mem_layout) = mem_layout tdecls layout f_cfg in
 
   (* Calculate stack frame size *)
-  let locals_size = (List.length layout) * 8 in
+  let frame_size = (List.length layout) * 8 + mem_size in
+  let ctxt = { tdecls; layout; frame_size } in
 
   (* Move function parameters into corresponding stack slots *)
   let params = List.combine (List.init (List.length f_param) Fun.id) f_param in
   let f (n, uid) = interm_mov (arg_loc n) (lookup layout uid) in
   let param_moves = List.map f params |> List.concat in
 
+  (* Make pointers point to correct memory locations *)
+  let set_ptr_of_uid (uid, offset) = [ Leaq, [Ind3 (Lit (Int64.of_int offset), Rbp); Reg R10]
+                                     ; Movq, [Reg R10; lookup layout uid]] in
+  let set_mem_ptrs = List.map set_ptr_of_uid mem_layout |> List.flatten in
+
   (* Construct function prelude *)
   let function_prelude : ins list =
     let open Asm in
     [ Pushq, [~%Rbp]
     ; Movq, [~%Rsp; ~%Rbp]
-    ; Subq, [~$locals_size; ~%Rsp]
-    ] @ param_moves
+    ; Subq, [~$frame_size; ~%Rsp]
+    ] @ param_moves @ set_mem_ptrs
   in
 
   (* Compile first block and append to function prelude *)
