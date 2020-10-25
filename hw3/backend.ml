@@ -101,7 +101,7 @@ let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins list =
   function ll_op -> match ll_op with
     | Null -> [Movq, [~$0; dest]]
     | Const i -> [Movq, [Imm (Lit i); dest]]
-    | Gid g-> [Leaq, [Ind1 (Lbl (Platform.mangle g)); dest]]
+    | Gid g -> [Leaq, [Ind3 ((Lbl (Platform.mangle g)), Rip); dest]]
     | Id u -> interm_mov (lookup layout u) dest
 
 
