@@ -90,8 +90,8 @@ let lookup m x = List.assoc x m
    destination (usually a register).
 *)
 let interm_mov (o:operand) (dest:operand) = [
-  (Movq, [o; Reg R09]);
-  (Movq, [Reg R09; dest])
+  (Movq, [o; Reg R10]);
+  (Movq, [Reg R10; dest])
 ]
 
 let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins list =
@@ -100,7 +100,7 @@ let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins list =
   function ll_op -> match ll_op with
     | Null -> [(Movq, [~$0; dest])]
     | Const i -> [(Movq, [Imm (Lit i); dest])]
-    | Gid g -> failwith "globals unimplemented"
+    | Gid g -> [(Movq, [Imm (Lbl g); dest])]
     | Id u -> interm_mov (lookup layout u) dest
 
 
@@ -124,9 +124,38 @@ let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins list =
    [ NOTE: Don't forget to preserve caller-save registers (only if
    needed). ]
 *)
+let arg_loc_call (n : int) : operand =
+  match n with
+    | 0 -> Reg Rdi
+    | 1 -> Reg Rsi
+    | 2 -> Reg Rdx
+    | 3 -> Reg Rcx
+    | 4 -> Reg R08
+    | 5 -> Reg R09
+    | i -> let displacement = ((i - 6)) * 8 in Ind3(Lit (Int64.of_int displacement), Rsp)
 
+let rec interleave (a:'a list) (b:'a list) : 'a list =
+  match a with
+    | [] -> b
+    | x::xs -> x::(interleave b xs)
 
+let compile_call (ctxt:ctxt) (ty:Ll.ty) (op:Ll.operand) (argl:(Ll.ty * Ll.operand) list) : ins list =
+  (* Move arguments into registers *)
+  let operands = List.map snd argl in
+  let intermediates = List.map (compile_operand ctxt (Reg R10)) operands in
+  let arg_locs = List.init (List.length operands) arg_loc_call in
+  let move_to_arg_locs = List.map (fun n -> [Movq, [Reg R10; n]]) arg_locs in
 
+  let rsp_shift_amount = if List.length argl > 6 then 8 * (List.length argl - 6) else 0 in
+
+  let open Asm in
+  let rsp_shift = [Subq, [~$rsp_shift_amount; Reg Rsp]] in
+  let rsp_unshift = [Addq, [~$rsp_shift_amount; Reg Rsp]] in
+  let prelude = interleave intermediates move_to_arg_locs |> List.flatten in
+  let call = compile_operand ctxt (Reg Rax) op @ [(Callq, [Reg Rax])] in
+  let epilogue = rsp_unshift in
+
+  rsp_shift @ prelude @ call @ epilogue
 
 (* compiling getelementptr (gep)  ------------------------------------------- *)
 
@@ -267,7 +296,7 @@ let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
       @ compile_operand ctxt (Reg Rcx) op2
       @ compile_icmp ctxt cnd ty
     | Call (ty, op, argl)
-      -> failwith "unimplemented Call instruction"
+      -> compile_call ctxt ty op argl
     | Bitcast (ty1, op, ty2)
       -> compile_operand ctxt (Reg Rax) op
     | Gep (ty, op, opl)
