@@ -445,12 +445,14 @@ let mem_layout (tdecls:(tid * ty) list) (layout:layout) ((block, lbled_blocks):c
 
   let uid_widths = List.map (fun (uid, ty) -> (uid, size_ty tdecls ty)) alloca_types in
   let (uids, widths) = List.split uid_widths in
+
   let mem_size = sum widths in
-  let offsets = if List.length widths <> 0 then
-      partial_sums widths |> drop_last |> (@) [0] |> List.map ((+) locals_size)
-    else
-      []
-  in
+  (* If widths of the types are e.g.  8, 24, 32,  8
+     then the offsets should be       0,  8, 32, 64
+     The offsets are calculated as the partial sums of the widths,
+     but prepended with a 0 and dropping the last element. *)
+  let offsets = partial_sums widths |> (@) [0] |> drop_last |> List.map ((+) locals_size) in
+
   (mem_size, List.combine uids offsets)
 
 
