@@ -140,23 +140,23 @@ let rec interleave (a:'a list) (b:'a list) : 'a list =
     | x::xs -> x::(interleave b xs)
 
 let compile_call (ctxt:ctxt) (ty:Ll.ty) (op:Ll.operand) (argl:(Ll.ty * Ll.operand) list) : ins list =
-  (* Move arguments into registers *)
+  (* Move arguments into registers and stack slots *)
   let operands = List.map snd argl in
   let intermediates = List.map (compile_operand ctxt (Reg R10)) operands in
   let arg_locs = List.init (List.length operands) arg_loc_call in
   let move_to_arg_locs = List.map (fun n -> [Movq, [Reg R10; n]]) arg_locs in
 
+  (* Increment rsp by amount of arguments pushed onto stack *)
   let rsp_shift_amount = if List.length argl > 6 then 8 * (List.length argl - 6) else 0 in
 
   let open Asm in
   let rsp_shift = [Subq, [~$rsp_shift_amount; Reg Rsp]] in
   let rsp_unshift = [Addq, [~$rsp_shift_amount; Reg Rsp]] in
-  let prelude = interleave intermediates move_to_arg_locs |> List.flatten in
+  let arg_moves = interleave intermediates move_to_arg_locs |> List.flatten in
   let call = compile_operand ctxt (Reg Rax) op @ [(Callq, [Reg Rax])] in
-  let epilogue = rsp_unshift in
 
-  rsp_shift @ prelude @ call @ epilogue
-
+  rsp_shift @ arg_moves @ call @ rsp_unshift
+  
 (* compiling getelementptr (gep)  ------------------------------------------- *)
 
 (* The getelementptr instruction computes an address by indexing into
@@ -237,16 +237,15 @@ let compile_bop (ctxt:ctxt) : Ll.bop -> ins list =
 
 let compile_icmp ({ tdecls; layout }:ctxt) (cnd:Ll.cnd) (ty:Ll.ty) =
   let open Asm in
-  if ty = I64 then
-    let x86_cnd = compile_cnd cnd in
-    [ Cmpq, [~%Rcx; ~%Rax]
-    (* Clear rax value (setb only sets lower byte) *)
-    ; Movq, [~$0; ~%Rax]
-    ; Set x86_cnd, [~%Rax]
-    ]
-  else
-    (* XXX: Does icmp compare aggregate values or only the pointers? *)
-    failwith "compile_icmp unimplemented for non-I64 values"
+  match ty with
+    | I1 | I8 | I64 | Ptr _
+      -> let x86_cnd = compile_cnd cnd in
+                  [ Cmpq, [~%Rcx; ~%Rax]
+                  (* Clear rax value (setb only sets lower byte) *)
+                  ; Movq, [~$0; ~%Rax]
+                  ; Set x86_cnd, [~%Rax]
+                  ]
+    | _ -> failwith "invalid Icmp type"
 
 
 (* compiling instructions  -------------------------------------------------- *)
