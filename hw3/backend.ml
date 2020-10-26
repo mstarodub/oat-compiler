@@ -125,11 +125,6 @@ let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins list =
    [ NOTE: Don't forget to preserve caller-save registers (only if
    needed). ]
 *)
-let align_to_16 (n : int) : int =
-  match n mod 16 with
-    | 8 -> (n + 8)
-    | 0 -> n
-    | _ -> failwith "not 8-byte aligned"
 
 let arg_loc_call (n : int) : operand =
   match n with
@@ -153,13 +148,15 @@ let compile_call (ctxt:ctxt) (ty:Ll.ty) (op:Ll.operand) (argl:(Ll.ty * Ll.operan
   let arg_locs = List.init (List.length operands) arg_loc_call in
   let move_to_arg_locs = List.map (fun n -> [Movq, [Reg R10; n]]) arg_locs in
 
-  (* Increment rsp by amount of arguments pushed onto stack *)
-  let rsp_shift_amount = if List.length argl > 6 then 8 * (List.length argl - 6) else 0 in
-  let rsp_aligned_shift_amount = rsp_shift_amount |> align_to_16 in
+  (* Increment rsp to accomodate arguments pushed onto stack, aligned to 16 bytes *)
+  let { tdecls; layout; frame_size } = ctxt in
+  let rsp_shift_base = if List.length argl > 6 then 8 * (List.length argl - 6) else 0 in
+  let rsp_shift_correction = if (frame_size + rsp_shift_base) mod 16 = 0 then 0 else 8 in
+  let rsp_shift_amount = rsp_shift_base + rsp_shift_correction in
 
   let open Asm in
-  let rsp_shift = [Subq, [~$rsp_aligned_shift_amount; Reg Rsp]] in
-  let rsp_unshift = [Addq, [~$rsp_aligned_shift_amount; Reg Rsp]] in
+  let rsp_shift = [Subq, [~$rsp_shift_amount; Reg Rsp]] in
+  let rsp_unshift = [Addq, [~$rsp_shift_amount; Reg Rsp]] in
   let arg_moves = interleave intermediates move_to_arg_locs |> List.flatten in
   let call = compile_operand ctxt (Reg Rax) op @ [(Callq, [Reg Rax])] in
 
@@ -537,7 +534,7 @@ let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_ty; f_param; f_cfg
   let (mem_size, mem_layout) = mem_layout tdecls layout f_cfg in
 
   (* Calculate stack frame size *)
-  let frame_size = (List.length layout) * 8 + mem_size |> align_to_16 in
+  let frame_size = (List.length layout) * 8 + mem_size in
   let ctxt = { tdecls; layout; frame_size } in
 
   (* Move function parameters into corresponding stack slots *)
