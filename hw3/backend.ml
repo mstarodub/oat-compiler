@@ -389,6 +389,7 @@ let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
   let stackframe_epilogue = [
     (Addq, [~$frame_size; ~%Rsp]);
     (Popq, [~%Rbp]);
+    (* (Popq, [~%Rcx]); *)
     (Retq, [])
   ] in
   let jump_label lbl = [ Jmp, [~$$(mk_lbl fn lbl)] ] in
@@ -469,7 +470,7 @@ let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
   let all_blocks = List.split lbled_blocks |> snd |> List.cons block in
   let all_uids = List.map extract_uids all_blocks |> List.flatten |> (@) args in
 
-  let calc_offset n = (-8) * (n + 1) |> Int64.of_int in
+  let calc_offset n = (-16) * (n + 1) |> Int64.of_int in
   let offset_to_operand o = Ind3(Lit o, Rbp) in
   let offsets = List.init (List.length all_uids) calc_offset in
   let operands = List.map offset_to_operand offsets in
@@ -492,7 +493,7 @@ let rec drop n l =
   | _ -> l
 
 let mem_layout (tdecls:(tid * ty) list) (layout:layout) ((block, lbled_blocks):cfg) : int * (uid * int) list =
-  let locals_size = (List.length layout) * 8 in
+  let locals_size = (List.length layout) * 16 in
 
   let all_blocks = List.split lbled_blocks |> snd |> List.cons block in
   let all_insns = List.map (fun { insns; term } -> insns) all_blocks |> List.flatten in
@@ -504,7 +505,7 @@ let mem_layout (tdecls:(tid * ty) list) (layout:layout) ((block, lbled_blocks):c
   let mem_size = sum widths in
   (* If widths of the types are e.g.  8, 24, 32,  8
      then the offsets should be      -8,-32,-64,-72 *)
-  let offsets = scanl (+) 0 widths |> drop 1 |> List.map ((+) locals_size) |> List.map Int.neg in
+  let offsets = scanl (+) 0 widths |> drop 1 |> List.map ((+) locals_size) |> List.map (Int.mul 2) |> List.map Int.neg in
 
   (mem_size, List.combine uids offsets)
 
@@ -530,7 +531,7 @@ let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_ty; f_param; f_cfg
   let (mem_size, mem_layout) = mem_layout tdecls layout f_cfg in
 
   (* Calculate stack frame size *)
-  let frame_size = (List.length layout) * 8 + mem_size in
+  let frame_size = (List.length layout) * 16 + mem_size in
   let ctxt = { tdecls; layout; frame_size } in
 
   (* Move function parameters into corresponding stack slots *)
@@ -546,6 +547,7 @@ let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_ty; f_param; f_cfg
   (* Construct function prelude *)
   let function_prelude : ins list =
     let open Asm in
+    (* [ Pushq, [~%Rax] *)
     [ Pushq, [~%Rbp]
     ; Movq, [~%Rsp; ~%Rbp]
     ; Subq, [~$frame_size; ~%Rsp]
