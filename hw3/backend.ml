@@ -223,23 +223,19 @@ let rec take (n: int) (l:'a list) : 'a list =
     | (n, x::xs) -> x :: (take (n-1) xs)
 
 let compile_gep (ctxt:ctxt) (op : Ll.ty * Ll.operand) (path: Ll.operand list) : ins list =
-  let rec next_array_addr ctxt t i is : ins list =
-    let open Asm in
-    let { tdecls; layout; frame_size } = ctxt in
+  let open Asm in
+  let { tdecls; layout; frame_size } = ctxt in
+
+  let rec next_array_addr t i is : ins list =
     (* compute offset based on index and type size *)
     let size_t = size_ty tdecls t in
-    let load_index = compile_operand ctxt ~%Rdx i in
-    let compute_offset = [ Movq, [~$size_t; ~%Rcx]
-                         ; Imulq, [~%Rdx; ~%Rcx]
-                         ]
-    in
+    let load_index = compile_operand ctxt ~%Rcx i in
+    let compute_offset = [Imulq, [~$size_t; ~%Rcx]] in
     (* add offset to current address *)
     let next_addr = [Addq, [~%Rcx; ~%Rax]] in
-    load_index @ compute_offset @ next_addr @ (decide ctxt t is)
+    load_index @ compute_offset @ next_addr @ (decide t is)
 
-  and next_struct_addr ctxt tys i is : ins list =
-    let open Asm in
-    let { tdecls; layout; frame_size } = ctxt in
+  and next_struct_addr tys i is : ins list =
     (* get index from const value *)
     let index = match i with
       | Const c -> Int64.to_int c
@@ -249,38 +245,35 @@ let compile_gep (ctxt:ctxt) (op : Ll.ty * Ll.operand) (path: Ll.operand list) : 
     (* compute offset based on type sizes *)
     let ty_sizes = List.map (size_ty tdecls) tys in
     let offset = take index ty_sizes |> sum in
-    (* load offset, add to current addr *)
-    let load_offset = [ Movq, [~$offset; ~%Rcx]] in
-    let next_addr = [Addq, [~%Rcx; ~%Rax]] in
-    load_offset @ next_addr @ (decide ctxt next_ty is)
+    (* add offset to current addr *)
+    let next_addr = [Addq, [~$offset; ~%Rax]] in
+    next_addr @ (decide next_ty is)
 
-  and decide ctxt t is : ins list =
+  and decide t is : ins list =
     (* Current address is loaded in Rax *)
     (* Current type is t *)
     (* Return address should be in Rax *)
-    let { tdecls; layout; frame_size } = ctxt in
     match is with
       | [] -> []
       | i::is -> begin match t with
-        | Struct tys -> next_struct_addr ctxt tys i is
-        | Array (l, ty) -> next_array_addr ctxt ty i is
+        | Struct tys -> next_struct_addr tys i is
+        | Array (l, ty) -> next_array_addr ty i is
         (* resolve named types *)
-        | Namedt tid -> decide ctxt (lookup tdecls tid) (i::is)
+        | Namedt tid -> decide (lookup tdecls tid) (i::is)
         | _ -> failwith "invalid GEP path"
       end
   in
 
-  let start ctxt t op =
-    let open Asm in
+  let start t op =
     let load_addr = compile_operand ctxt ~%Rax op in
     match path with
       (* path should not be empty, must contain at least one operand *)
       | [] -> failwith "empty path in GEP"
       (* first operand is always considered as array index *)
-      | (i::is) -> load_addr @ (next_array_addr ctxt t i is)
+      | (i::is) -> load_addr @ (next_array_addr t i is)
   in
   match op with
-    | (Ptr t, op) -> start ctxt t op
+    | (Ptr t, op) -> start t op
     | _ -> failwith "GEP only defined for Ptr values"
 
 let compile_bop (ctxt:ctxt) : Ll.bop -> ins list =
