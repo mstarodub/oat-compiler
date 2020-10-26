@@ -1,4 +1,4 @@
-define i64 @program(i64 %argc, i8** %arcv) {
+define i64 @main(i64 %argc, i8** %arcv) {
   br i1 1, label %one, label %wrong
 correct:
   ret i64 7

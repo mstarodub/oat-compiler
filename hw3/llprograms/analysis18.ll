@@ -1,4 +1,4 @@
-define i64 @program(i64 %argc, i8** %arcv) {
+define i64 @main(i64 %argc, i8** %arcv) {
   %1 = alloca i64
   %2 = add i64 5, 9
   %3 = mul i64 3, %2

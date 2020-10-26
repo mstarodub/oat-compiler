@@ -12,8 +12,8 @@ loop_condition:
   br i1 %3, label %loop_body, label %post_loop
 loop_body:
   call void @foo(i64 0, i64 0, i64 0, i64 0, i64 0, i64 0, i64 0)
-  %5 = sub i64 %2, 1
-  store i64 %5, i64* %1
+  %4 = sub i64 %2, 1
+  store i64 %4, i64* %1
   br label %loop_condition
 post_loop:
   ret i64 0

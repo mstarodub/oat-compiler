@@ -1,4 +1,4 @@
-define i64 @program(i64 %argc, i8** %arcv) {
+define i64 @main(i64 %argc, i8** %arcv) {
   %p_lfsr = alloca i64
   %start = add i64 8, 0
   store i64 %start, i64* %p_lfsr

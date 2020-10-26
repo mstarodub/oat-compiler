@@ -4,7 +4,7 @@
 @md = global %node { i64 2, %node* @tl }
 @tl = global %node { i64 3, %node* null }
 
-define i64 @program(i64 %argc, i8** %arcv) {
+define i64 @main(i64 %argc, i8** %arcv) {
   %head = getelementptr %node, %node* @hd, i32 0, i32 0
   %link = getelementptr %node, %node* @hd, i32 0, i32 1
   %next = load %node*, %node** %link

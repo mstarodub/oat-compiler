@@ -1,4 +1,4 @@
-define i64 @program(i64 %x, i64 %y) {
+define i64 @main(i64 %x, i64 %y) {
   %sx = alloca i64
   %sy = alloca i64
   %v1 = add i64 %x, %y

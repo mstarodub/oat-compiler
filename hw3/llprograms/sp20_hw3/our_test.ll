@@ -19,8 +19,8 @@ define i64 @main(i64 %argc, i8** %arcv) {
 	store i64 11, i64* %5
 	%6 = getelementptr %arr, %arr* %4, i32 0, i32 1
 	store i64 10, i64* %5
-	%9 = load i64, i64* %a
-	%10 = load i64, i64* %b
-	%result = sub i64 %9, %10
+	%7 = load i64, i64* %a
+	%8 = load i64, i64* %b
+	%result = sub i64 %7, %8
 	ret i64 %result
 }

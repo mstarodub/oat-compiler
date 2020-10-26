@@ -1,11 +1,17 @@
+; ModuleID = 'gep10.ll'
+source_filename = "gep10.ll"
+target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
+target triple = "x86_64-pc-linux-gnu"
+
 %struct = type { i64, [5 x i64], i64 }
 
-@gbl = global %struct { i64 1, [5 x i64] [ i64 2, i64 3, i64 4, i64 5, i64 6 ], i64 7 }
+@gbl = local_unnamed_addr global %struct { i64 1, [5 x i64] [i64 2, i64 3, i64 4, i64 5, i64 6], i64 7 }
 
-define i64 @main(i64 %argc, i8** %arcv) {
-  %1 = add i64 0, %argc
-  %2 = getelementptr %struct, %struct* @gbl, i32 0, i32 1, i64 %1
-  %3 = load i64, i64* %2
-  ret i64 %3
+; Function Attrs: norecurse nounwind readonly
+define i64 @main(i64 %argc, i8** nocapture readnone %arcv) local_unnamed_addr #0 {
+  %1 = getelementptr %struct, %struct* @gbl, i64 0, i32 1, i64 %argc
+  %2 = load i64, i64* %1, align 8
+  ret i64 %2
 }
 
+attributes #0 = { norecurse nounwind readonly }

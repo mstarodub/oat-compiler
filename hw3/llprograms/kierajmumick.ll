@@ -1,4 +1,4 @@
-define i64 @program(i64 %argc, i8** %argv) {
+define i64 @main(i64 %argc, i8** %argv) {
   %1 = add i64 30, 0
   %2 = sub i64 420, 24
   %3 = add i64 24, %2
