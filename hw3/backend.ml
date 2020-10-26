@@ -90,10 +90,13 @@ let lookup m x = List.assoc x m
    the X86 instruction that moves an LLVM operand into a designated
    destination (usually a register).
 *)
-let interm_mov (o:operand) (dest:operand) = [
-  (Movq, [o; Reg R10]);
-  (Movq, [Reg R10; dest])
-]
+let interm_mov (o:operand) (dest:operand) =
+  match (o, dest) with
+  | (_, Reg _) | (Reg _, _) | (_, Imm _) | (Imm _, _)
+    -> [Movq, [o; dest]]
+  | _ -> [ (Movq, [o; Reg R10])
+         ; (Movq, [Reg R10; dest])
+         ]
 
 let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins list =
   let { tdecls; layout; frame_size } = ctxt in
