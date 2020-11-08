@@ -48,11 +48,23 @@
   ( "=", EQ);
   ( "==", EQEQ);
   ( "!", BANG);
+  ( "!=", BANGEQ);
   ( "~", TILDE);
   ( "(", LPAREN);
   ( ")", RPAREN);
   ( "[", LBRACKET);
   ( "]", RBRACKET);
+  ( "<", LT);
+  ( "<=", LTEQ);
+  ( "<<", LTLT);
+  ( ">", GT);
+  ( ">=", GTEQ);
+  ( ">>", GTGT);
+  ( ">>>", GTGTGT);
+  ( "&", AMP);
+  ( "[&]", IAND);
+  ( "|", PIPE);
+  ( "[|]", IOR);
   ]
 
 let (symbol_table : (string, Parser.token) Hashtbl.t) = Hashtbl.create 1024
@@ -127,7 +139,9 @@ rule token = parse
   | newline { newline lexbuf; token lexbuf }
 
   | ';' | ',' | '{' | '}' | '+' | '-' | '*' | '=' | "=="
-  | "!=" | '!' | '~' | '(' | ')' | '[' | ']'
+  | "!=" | '!' | '~' | '(' | ')' | '[' | ']' | '<' | '>'
+  | "<<" | ">>" | "<=" | ">=" | ">>>" | '&' | '|' | "[&]"
+  | "[|]"
     { create_token lexbuf }
 
   | _ as c { unexpected_char lexbuf c }

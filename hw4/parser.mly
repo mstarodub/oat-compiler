@@ -29,6 +29,18 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 %token DASH     /* - */
 %token STAR     /* * */
 %token EQEQ     /* == */
+%token BANGEQ   /* != */
+%token LT       /* < */
+%token LTEQ     /* <= */
+%token GT       /* > */
+%token GTEQ     /* >= */
+%token AMP      /* & */
+%token PIPE     /* | */
+%token IAND     /* [&] */
+%token IOR      /* [|] */
+%token LTLT     /* << */
+%token GTGT     /* >> */
+%token GTGTGT   /* >>> */
 %token EQ       /* = */
 %token LPAREN   /* ( */
 %token RPAREN   /* ) */
@@ -38,6 +50,13 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 %token BANG     /* ! */
 %token GLOBAL   /* global */
 
+%left IOR
+%left IAND
+%left PIPE
+%left AMP
+%left EQEQ BANGEQ
+%left LT LTEQ GT GTEQ
+%left LTLT GTGT GTGTGT
 %left PLUS DASH
 %left STAR
 %nonassoc BANG
@@ -95,6 +114,18 @@ ty:
   | DASH   { Sub }
   | STAR   { Mul }
   | EQEQ   { Eq }
+  | BANGEQ { Neq }
+  | LT     { Lt }
+  | LTEQ   { Lte }
+  | GT     { Gt }
+  | GTEQ   { Gte }
+  | AMP    { And }
+  | PIPE   { Or }
+  | IAND   { IAnd }
+  | IOR    { IOr }
+  | LTLT   { Shl }
+  | GTGT   { Shr }
+  | GTGTGT { Sar }
 
 %inline uop:
   | DASH  { Neg }
