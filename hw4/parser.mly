@@ -18,6 +18,7 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 %token TSTRING  /* string */
 %token IF       /* if */
 %token ELSE     /* else */
+%token FOR      /* for */
 %token WHILE    /* while */
 %token RETURN   /* return */
 %token VAR      /* var */
@@ -156,6 +157,10 @@ exp:
 vdecl:
   | VAR id=IDENT EQ init=exp { (id, init) }
 
+vdecls:
+  | vdecls=separated_list(COMMA, vdecl)
+                        { vdecls }
+
 stmt:
   | d=vdecl SEMI        { loc $startpos $endpos @@ Decl(d) }
   | p=lhs EQ e=exp SEMI { loc $startpos $endpos @@ Assn(p,e) }
@@ -164,6 +169,9 @@ stmt:
   | ifs=if_stmt         { ifs }
   | RETURN SEMI         { loc $startpos $endpos @@ Ret(None) }
   | RETURN e=exp SEMI   { loc $startpos $endpos @@ Ret(Some e) }
+  (* TODO: let exp and stmt in for loop be optional *)
+  | FOR LPAREN d=vdecls SEMI e=exp SEMI s=stmt RPAREN b=block
+                        { loc $startpos $endpos @@ For(d, Some e, Some s, b) }
   | WHILE LPAREN e=exp RPAREN b=block
                         { loc $startpos $endpos @@ While(e, b) }
 
