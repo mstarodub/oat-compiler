@@ -26,6 +26,7 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 %token VAR      /* var */
 %token TRUE     /* true */
 %token FALSE    /* false */
+%token NEW      /* new */
 %token SEMI     /* ; */
 %token COMMA    /* , */
 %token LBRACE   /* { */
@@ -143,6 +144,8 @@ gexp:
   | i=INT               { loc $startpos $endpos @@ CInt i }
   | TRUE                { loc $startpos $endpos @@ CBool true }
   | FALSE               { loc $startpos $endpos @@ CBool false }
+  | NEW t=ty LBRACKET RBRACKET LBRACE ges=separated_list(COMMA, gexp) RBRACE
+                        { loc $startpos $endpos @@ CArr (t, ges) }
 
 lhs:
   | id=IDENT            { loc $startpos $endpos @@ Id id }
@@ -159,6 +162,12 @@ exp:
   | id=IDENT            { loc $startpos $endpos @@ Id id }
   | e=exp LBRACKET i=exp RBRACKET
                         { loc $startpos $endpos @@ Index (e, i) }
+  | NEW t=ty LBRACKET RBRACKET LBRACE es=separated_list(COMMA, exp) RBRACE
+                        { loc $startpos $endpos @@ CArr (t, es) }
+  | NEW TINT LBRACKET e=exp RBRACKET
+                        { loc $startpos $endpos @@ NewArr(TInt, e) }
+  | NEW TBOOL LBRACKET e=exp RBRACKET
+                        { loc $startpos $endpos @@ NewArr(TBool, e) }
   | e=exp LPAREN es=separated_list(COMMA, exp) RPAREN
                         { loc $startpos $endpos @@ Call (e,es) }
   | LPAREN e=exp RPAREN { e }

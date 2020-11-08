@@ -40,6 +40,7 @@
   ("global", GLOBAL);
   ("true", TRUE);
   ("false", FALSE);
+  ("new", NEW);
 
   (* Symbols *)
   ( ";", SEMI);
