@@ -8,12 +8,14 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 
 /* Declare your tokens here. */
 %token EOF
-%token <int64>  INT
+%token <int64> INT
+%token <bool> BOOL
 %token NULL
 %token <string> STRING
 %token <string> IDENT
 
 %token TINT     /* int */
+%token TBOOL    /* bool */
 %token TVOID    /* void */
 %token TSTRING  /* string */
 %token IF       /* if */
@@ -22,6 +24,8 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 %token WHILE    /* while */
 %token RETURN   /* return */
 %token VAR      /* var */
+%token TRUE     /* true */
+%token FALSE    /* false */
 %token SEMI     /* ; */
 %token COMMA    /* , */
 %token LBRACE   /* { */
@@ -100,6 +104,7 @@ arglist:
 
 ty:
   | TINT   { TInt }
+  | TBOOL  { TBool }
   | r=rtyp { TRef r }
 
 %inline ret_ty:
@@ -134,8 +139,10 @@ ty:
   | TILDE { Bitnot }
 
 gexp:
-  | t=rtyp NULL  { loc $startpos $endpos @@ CNull t }
-  | i=INT      { loc $startpos $endpos @@ CInt i }
+  | t=rtyp NULL         { loc $startpos $endpos @@ CNull t }
+  | i=INT               { loc $startpos $endpos @@ CInt i }
+  | TRUE                { loc $startpos $endpos @@ CBool true }
+  | FALSE               { loc $startpos $endpos @@ CBool false }
 
 lhs:
   | id=IDENT            { loc $startpos $endpos @@ Id id }
@@ -144,7 +151,9 @@ lhs:
 
 exp:
   | i=INT               { loc $startpos $endpos @@ CInt i }
-  | t=rtyp NULL           { loc $startpos $endpos @@ CNull t }
+  | t=rtyp NULL         { loc $startpos $endpos @@ CNull t }
+  | TRUE                { loc $startpos $endpos @@ CBool true }
+  | FALSE               { loc $startpos $endpos @@ CBool false }  
   | e1=exp b=bop e2=exp { loc $startpos $endpos @@ Bop (b, e1, e2) }
   | u=uop e=exp         { loc $startpos $endpos @@ Uop (u, e) }
   | id=IDENT            { loc $startpos $endpos @@ Id id }

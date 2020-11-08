@@ -29,6 +29,7 @@
   ("null", NULL);
   ("void", TVOID);
   ("int", TINT);
+  ("bool", TBOOL);
   ("string", TSTRING);
   ("else", ELSE);
   ("if", IF);
@@ -37,6 +38,8 @@
   ("return", RETURN);
   ("var", VAR);
   ("global", GLOBAL);
+  ("true", TRUE);
+  ("false", FALSE);
 
   (* Symbols *)
   ( ";", SEMI);
