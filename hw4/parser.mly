@@ -156,7 +156,7 @@ exp:
   | i=INT               { loc $startpos $endpos @@ CInt i }
   | t=rtyp NULL         { loc $startpos $endpos @@ CNull t }
   | TRUE                { loc $startpos $endpos @@ CBool true }
-  | FALSE               { loc $startpos $endpos @@ CBool false }  
+  | FALSE               { loc $startpos $endpos @@ CBool false }
   | e1=exp b=bop e2=exp { loc $startpos $endpos @@ Bop (b, e1, e2) }
   | u=uop e=exp         { loc $startpos $endpos @@ Uop (u, e) }
   | id=IDENT            { loc $startpos $endpos @@ Id id }
@@ -187,9 +187,8 @@ stmt:
   | ifs=if_stmt         { ifs }
   | RETURN SEMI         { loc $startpos $endpos @@ Ret(None) }
   | RETURN e=exp SEMI   { loc $startpos $endpos @@ Ret(Some e) }
-  (* TODO: let exp and stmt in for loop be optional *)
-  | FOR LPAREN d=vdecls SEMI e=exp SEMI s=stmt RPAREN b=block
-                        { loc $startpos $endpos @@ For(d, Some e, Some s, b) }
+  | FOR LPAREN d=vdecls SEMI e=option(exp) SEMI s=option(stmt) RPAREN b=block
+                        { loc $startpos $endpos @@ For(d, e, s, b) }
   | WHILE LPAREN e=exp RPAREN b=block
                         { loc $startpos $endpos @@ While(e, b) }
 
