@@ -142,6 +142,7 @@ ty:
 gexp:
   | t=rtyp NULL         { loc $startpos $endpos @@ CNull t }
   | i=INT               { loc $startpos $endpos @@ CInt i }
+  | s=STRING            { loc $startpos $endpos @@ CStr s }
   | TRUE                { loc $startpos $endpos @@ CBool true }
   | FALSE               { loc $startpos $endpos @@ CBool false }
   | NEW t=ty LBRACKET RBRACKET LBRACE ges=separated_list(COMMA, gexp) RBRACE
@@ -154,6 +155,7 @@ lhs:
 
 exp:
   | i=INT               { loc $startpos $endpos @@ CInt i }
+  | s=STRING            { loc $startpos $endpos @@ CStr s }
   | t=rtyp NULL         { loc $startpos $endpos @@ CNull t }
   | TRUE                { loc $startpos $endpos @@ CBool true }
   | FALSE               { loc $startpos $endpos @@ CBool false }
@@ -178,6 +180,8 @@ vdecl:
 vdecls:
   | vdecls=separated_list(COMMA, vdecl)
                         { vdecls }
+gdecl:
+  | GLOBAL id=IDENT EQ init=gexp { {name=id; init=init} }
 
 stmt:
   | d=vdecl SEMI        { loc $startpos $endpos @@ Decl(d) }
