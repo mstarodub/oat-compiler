@@ -180,9 +180,6 @@ vdecl:
 vdecls:
   | vdecls=separated_list(COMMA, vdecl)
                         { vdecls }
-gdecl:
-  | GLOBAL id=IDENT EQ init=gexp { {name=id; init=init} }
-
 stmt:
   | d=vdecl SEMI        { loc $startpos $endpos @@ Decl(d) }
   | p=lhs EQ e=exp SEMI { loc $startpos $endpos @@ Assn(p,e) }
