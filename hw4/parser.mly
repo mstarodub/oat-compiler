@@ -175,9 +175,6 @@ exp:
 vdecl:
   | VAR id=IDENT EQ init=exp { (id, init) }
 
-vdecls:
-  | vdecls=separated_list(COMMA, vdecl)
-                        { vdecls }
 stmt:
   | d=vdecl SEMI        { loc $startpos $endpos @@ Decl(d) }
   | p=lhs EQ e=exp SEMI { loc $startpos $endpos @@ Assn(p,e) }
@@ -186,7 +183,7 @@ stmt:
   | ifs=if_stmt         { ifs }
   | RETURN SEMI         { loc $startpos $endpos @@ Ret(None) }
   | RETURN e=exp SEMI   { loc $startpos $endpos @@ Ret(Some e) }
-  | FOR LPAREN d=vdecls SEMI e=option(exp) SEMI s=option(stmt) RPAREN b=block
+  | FOR LPAREN d=separated_list(COMMA, vdecl) SEMI e=option(exp) SEMI s=option(stmt) RPAREN b=block
                         { loc $startpos $endpos @@ For(d, e, s, b) }
   | WHILE LPAREN e=exp RPAREN b=block
                         { loc $startpos $endpos @@ While(e, b) }

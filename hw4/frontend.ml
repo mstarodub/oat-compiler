@@ -176,12 +176,12 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
    }
    /------------------------------------------------
 
-   The translation (given by cmp_ty) of the type int[] is {i64, [0 x i64}* so
+   The translation (given by cmp_ty) of the type int[] is {i64, [0 x i64] }* so
    the corresponding LLVM IR declaration will look like:
 
    @arr = global { i64, [0 x i64] }* null
 
-   This means that the type of the LLVM IR identifier @arr is {i64, [0 x i64]}**
+   This means that the type of the LLVM IR identifier @arr is {i64, [0 x i64] }**
    which is consistent with the type of a locally-declared array variable.
 
    The local variable x would be allocated and initialized by (something like)
@@ -270,7 +270,7 @@ let gensym : string -> string =
   let c = ref 0 in
   fun (s:string) -> incr c; Printf.sprintf "_%s%d" s (!c)
 
-(* Amount of space an Oat type takes when stored in the satck, in bytes.
+(* Amount of space an Oat type takes when stored in the stack, in bytes.
    Note that since structured values are manipulated by reference, all
    Oat values take 8 bytes on the stack.
 *)

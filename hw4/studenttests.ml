@@ -36,6 +36,7 @@ let do_roundtr path =
 
 let parsetests = [
   do_roundtr "fact.oat";
+  do_roundtr "globals3.oat";
   (* do_roundtr "calculator.oat"; *)
   (* do_roundtr "float_multiply.oat"; *)
   (* do_roundtr "kmp.oat"; *)
@@ -104,5 +105,5 @@ let parsetests = [
 ]
 
 let provided_tests : suite = [
-  Test ("student test - rountrip parsing", parsetests);
+  Test ("student test - roundtrip parsing", parsetests);
 ]

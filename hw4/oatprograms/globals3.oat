@@ -1,4 +1,4 @@
-global arr = int[] null;
+global arr = int[]null;
 
 int program(int argc, string[] args) {
   return 17;
