@@ -36,12 +36,8 @@ let do_roundtr path =
 
 let parsetests = [
   do_roundtr "fact.oat";
-  (* ok *) (* do_roundtr "abs.oat"; *)
-  do_roundtr "arrayargs4.oat";
   (* do_roundtr "calculator.oat"; *)
   (* do_roundtr "float_multiply.oat"; *)
-  (* ok *) (* do_roundtr "hashcode.oat"; *)
-  do_roundtr "is_prime.oat";
   (* do_roundtr "kmp.oat"; *)
   (* do_roundtr "leastsquare.oat"; *)
   (* do_roundtr "lfsr2.oat"; *)
@@ -51,7 +47,6 @@ let parsetests = [
   (* do_roundtr "lib2.oat"; *)
   (* do_roundtr "lib3.oat"; *)
   (* do_roundtr "no_of_fac.oat"; *)
-  do_roundtr "phase2_1.oat";
   (* do_roundtr "qs_bs.oat"; *)
   (* do_roundtr "regalloctest2.oat"; *)
   (* do_roundtr "regalloctest.oat"; *)
@@ -69,10 +64,8 @@ let parsetests = [
   (* do_roundtr "runtime-fail4.oat"; *)
   (* do_roundtr "setg.oat"; *)
   (* do_roundtr "shortest_path_matrix.oat"; *)
-  do_roundtr "sqrt.oat";
   (* do_roundtr "tc10.oat"; *)
   (* do_roundtr "tc11.oat"; *)
-  do_roundtr "tc12.oat";
   (* do_roundtr "tc13.oat"; *)
   (* do_roundtr "tc14.oat"; *)
   (* do_roundtr "tc15.oat"; *)
@@ -88,19 +81,26 @@ let parsetests = [
   (* do_roundtr "tc5.oat"; *)
   (* do_roundtr "tc6.oat"; *)
   (* do_roundtr "tc7.oat"; *)
-  do_roundtr "tc8.oat";
   (* do_roundtr "tc9.oat"; *)
   (* do_roundtr "tc_ok1.oat"; *)
   (* do_roundtr "tc_ok2.oat"; *)
-  do_roundtr "tc_ok4.oat";
   (* do_roundtr "tc_ok5.oat"; *)
   (* do_roundtr "tc_ok6.oat"; *)
   (* do_roundtr "tc_ok7.oat"; *)
   (* do_roundtr "tc_ok8.oat"; *)
   (* do_roundtr "toascii.oat"; *)
-  do_roundtr "toposort.oat";
   (* do_roundtr "union_find.oat"; *)
   (* do_roundtr "xor_bool.oat"; *)
+  (* OK *) (* do_roundtr "abs.oat"; *)
+  (* OK *) (* do_roundtr "hashcode.oat"; *)
+  (* OK *) (* do_roundtr "tc12.oat"; *)
+  (* INVALID *) (* do_roundtr "arrayargs4.oat"; *)
+  (* INVALID *) (* do_roundtr "is_prime.oat"; *)
+  (* INVALID *) (* do_roundtr "phase2_1.oat"; *)
+  (* INVALID *) (* do_roundtr "sqrt.oat"; *)
+  (* INVALID *) (* do_roundtr "tc8.oat"; *)
+  (* INVALID *) (* do_roundtr "tc_ok4.oat"; *)
+  (* INVALID *) (* do_roundtr "toposort.oat"; *)
 ]
 
 let provided_tests : suite = [

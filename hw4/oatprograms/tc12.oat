@@ -1,5 +1,5 @@
 void f() {return;}
 void g() {
-  int i = f();
+  var i = f();
   return;
 }
