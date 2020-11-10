@@ -264,6 +264,8 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
 
 (* Some useful helper functions *)
 
+let extract_from_node ({elt; _}:'a node) : 'a = elt
+
 (* Generate a fresh temporary identifier. Since OAT identifiers cannot begin
    with an underscore, these should not clash with any source variables *)
 let gensym : string -> string =
@@ -365,20 +367,22 @@ let cmp_function_ctxt (c:Ctxt.t) (p:Ast.prog) : Ctxt.t =
    Only a small subset of OAT expressions can be used as global initializers
    in well-formed programs. (The constructors starting with C).
 *)
+let resolve_gexp_type exp =
+  let ty = match exp with
+  | CNull rty -> TRef rty
+  | CBool b -> TBool
+  | CInt i -> TInt
+  | CStr s -> TRef (RString)
+  | CArr (ty, _) -> TRef (RArray ty)
+  | _ -> failwith "invalid global initializer expression"
+  in cmp_ty ty
+
 let cmp_global_ctxt (c:Ctxt.t) (p:Ast.prog) : Ctxt.t =
-  let resolve_gexp_type exp = match exp with
-    | CNull rty -> TRef rty
-    | CBool b -> TBool
-    | CInt i -> TInt
-    | CStr s -> TRef (RString)
-    | CArr (ty, _) -> TRef (RArray ty)
-    | _ -> failwith "invalid global initializer expression"
-  in
   let f t decl = match decl with
     | Gfdecl _ -> t
     (* name = exp *)
     | Gvdecl { elt={ name; init={ elt=exp; _ } }; _ } ->
-      Ctxt.add t name (cmp_ty (resolve_gexp_type exp), Gid name)
+      Ctxt.add t name (resolve_gexp_type exp, Gid name)
   in
   List.fold_left f Ctxt.empty p
 
@@ -394,8 +398,8 @@ let cmp_global_ctxt (c:Ctxt.t) (p:Ast.prog) : Ctxt.t =
    5. Use cfg_of_stream to produce a LLVMlite cfg from
  *)
 
-let cmp_fdecl (c:Ctxt.t) (f:Ast.fdecl node) : Ll.fdecl * (Ll.gid * Ll.gdecl) list =
-  failwith "cmp_fdecl not implemented"
+let cmp_fdecl (c:Ctxt.t) ({elt=f; _}:Ast.fdecl node) : Ll.fdecl * (Ll.gid * Ll.gdecl) list =
+  failwith "unimplemented cmp_fdecl"
 
 (* Compile a global initializer, returning the resulting LLVMlite global
    declaration, and a list of additional global declarations.
@@ -409,8 +413,19 @@ let cmp_fdecl (c:Ctxt.t) (f:Ast.fdecl node) : Ll.fdecl * (Ll.gid * Ll.gdecl) lis
      be an array of pointers to arrays emitted as additional global declarations.
 *)
 
-let rec cmp_gexp c (e:Ast.exp node) : Ll.gdecl * (Ll.gid * Ll.gdecl) list =
-  failwith "cmp_gexp not implemented"
+let rec cmp_gexp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.gdecl * (Ll.gid * Ll.gdecl) list =
+  let ll_ty = resolve_gexp_type exp in
+  let ginit = match exp with
+    | CNull rty -> GNull
+    | CBool b -> if b then GInt 1L else GInt 0L
+    | CInt i -> GInt i
+    | CStr s -> GString s
+    | CArr (ty, exp_nodes) ->
+      let exps = List.map extract_from_node exp_nodes in
+      GNull (* TODO: fix this *)
+  in
+  let gdecl = (ll_ty, ginit) in
+  (gdecl, [])
 
 (* Oat internals function context ------------------------------------------- *)
 let internals = [
