@@ -166,10 +166,8 @@ exp:
                         { loc $startpos $endpos @@ Index (e, i) }
   | NEW t=ty LBRACKET RBRACKET LBRACE es=separated_list(COMMA, exp) RBRACE
                         { loc $startpos $endpos @@ CArr (t, es) }
-  | NEW TINT LBRACKET e=exp RBRACKET
-                        { loc $startpos $endpos @@ NewArr(TInt, e) }
-  | NEW TBOOL LBRACKET e=exp RBRACKET
-                        { loc $startpos $endpos @@ NewArr(TBool, e) }
+  | NEW t=ty LBRACKET e=exp RBRACKET
+                        { loc $startpos $endpos @@ NewArr(t, e) }
   | e=exp LPAREN es=separated_list(COMMA, exp) RPAREN
                         { loc $startpos $endpos @@ Call (e,es) }
   | LPAREN e=exp RPAREN { e }
