@@ -27,6 +27,7 @@ type stream = elt list
 let ( >@ ) x y = y @ x
 let ( >:: ) x y = y :: x
 let lift : (uid * insn) list -> stream = List.rev_map (fun (x,i) -> I (x,i))
+let lift_entry : (uid * insn) list -> stream = List.rev_map (fun (x,i) -> E (x,i))
 
 (* Build a CFG and collection of global variable definitions from a stream *)
 let cfg_of_stream (code:stream) : Ll.cfg * (Ll.gid * Ll.gdecl) list  =
@@ -264,6 +265,7 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
 
 (* Some useful helper functions *)
 
+let int64_of_bool (b: bool) : int64 = if b then 1L else 0L
 let extract_from_node ({elt; _}:'a node) : 'a = elt
 
 (* Generate a fresh temporary identifier. Since OAT identifiers cannot begin
@@ -305,12 +307,45 @@ let oat_alloc_array (t:Ast.ty) (size:Ll.operand) : Ll.ty * operand * stream =
      (CArr) and the (NewArr) expressions
 
 *)
-
 let rec cmp_exp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * stream =
   match exp with
-    | CInt i -> (I64, Const i, [])
-    | _ -> failwith "cmp_exp unimplemented"
-  
+    | CNull rty -> (cmp_rty rty, Null, [])
+    | CBool b -> (cmp_ty TBool, Const (int64_of_bool b), [])
+    | CInt i -> (cmp_ty TInt, Const i, [])
+    | CStr s -> failwith "cmp_exp unimplemented"
+    | CArr (ty, exprs) -> failwith "cmp_exp unimplemented"
+    | NewArr (ty, exp) -> failwith "cmp_exp unimplemented"
+    | Id id -> failwith "cmp_exp unimplemented"
+    | Index (exp1, exp2) -> failwith "cmp_exp unimplemented"
+    | Call (exp, exprs) -> failwith "cmp_exp unimplemented"
+    | Bop (bop, exp1, exp2) -> cmp_binop c bop exp1 exp2
+    | Uop (uop, exp) -> cmp_uop c uop exp
+
+and cmp_uop (c:Ctxt.t) (uop:unop) (exp:Ast.exp node) : Ll.ty * Ll.operand * stream =
+  let (ll_ty, ll_op, stream) = cmp_exp c exp in
+  let dest_uid = gensym "uop" in
+  let dest_ty = (if uop = Lognot then TBool else TInt) |> cmp_ty in
+  let insn = match uop with
+    | Neg -> Ll.Binop (Sub, dest_ty, Const 0L, ll_op)
+    | Lognot -> Ll.Binop (Xor, dest_ty, Const 1L, ll_op)
+    | Bitnot -> Ll.Binop (Xor, dest_ty, Const (-1L), ll_op)
+  in
+  (dest_ty, Id dest_uid, (I (dest_uid, insn)) :: stream)
+
+and cmp_binop (c:Ctxt.t) (bop:binop) (exp1:Ast.exp node) (exp2:Ast.exp node) : Ll.ty * Ll.operand * stream =
+  let (ll_ty_1, ll_op_1, stream_1) = cmp_exp c exp1 in
+  let (ll_ty_2, ll_op_2, stream_2) = cmp_exp c exp2 in
+  let dest_uid = gensym "binop" in
+  let dest_ty = match bop with
+    | Ast.Eq | Ast.Neq | Ast.Lt | Ast.Lte | Ast.Gt | Ast.Gte | Ast.And | Ast.Or -> cmp_ty TBool
+    | Ast.Add | Ast.Sub | Ast.Mul | Ast.IAnd | Ast.IOr | Ast.Shl | Ast.Shr | Ast.Sar -> cmp_ty TInt
+  in
+  let insn = match bop with
+    | Add -> Ll.Binop (Add, dest_ty, ll_op_1, ll_op_2)
+    | _ -> failwith "unimplemented cmp_binop"
+  in
+  (dest_ty, Id dest_uid, (I (dest_uid, insn)) :: stream_1 @ stream_2)
+    
 (* Compile a statement in context c with return typ rt. Return a new context,
    possibly extended with new local bindings, and the instruction stream
    implementing the statement.
@@ -343,9 +378,10 @@ let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * 
     | Ret None -> (c, [T (Ret (rt, None))])
     | Ret (Some exp) ->
         let (ty, op, stream) = cmp_exp c exp in
+        (* TODO: probably can remove this because typechecking isn't required *)
         if ty != rt then failwith (String.concat " " ["Type mismatch between"; Llutil.string_of_ty ty; "and"; Llutil.string_of_ty rt]);
-        let ret = [T (Ret (rt, Some op))] in
-        (c, stream @ ret)
+        let ret = T (Ret (rt, Some op)) in
+        (c, ret :: stream)
     | _ -> failwith "cmp_stmt not implemented"
   
 
@@ -454,11 +490,11 @@ let cmp_fdecl (c:Ctxt.t) ({elt=f; _}:Ast.fdecl node) : Ll.fdecl * (Ll.gid * Ll.g
   let start_ctxt = List.fold_left (fun c (id, bnd) -> Ctxt.add c id bnd) c bindings in
 
   (* Compile function body *)
-  let setup_stream = lift (alloca_insns @ store_insns) in
+  let setup_stream = lift_entry (alloca_insns @ store_insns) in
   let (end_ctxt, stream) = cmp_block start_ctxt ll_rty body in
 
   (* Create CFG *)
-  let (ll_cfg, gdecls) = cfg_of_stream (setup_stream @ stream) in
+  let (ll_cfg, gdecls) = cfg_of_stream (stream @ setup_stream) in
 
   ({ f_ty=ll_f_ty; f_param=ll_f_param; f_cfg=ll_cfg }, gdecls)
 
@@ -478,12 +514,13 @@ let rec cmp_gexp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.gdecl * (Ll.gid * L
   let ll_ty = resolve_gexp_type exp in
   let ginit = match exp with
     | CNull rty -> GNull
-    | CBool b -> if b then GInt 1L else GInt 0L
+    | CBool b -> GInt (int64_of_bool b)
     | CInt i -> GInt i
     | CStr s -> GString s
     | CArr (ty, exp_nodes) ->
       let exps = List.map extract_from_node exp_nodes in
       GNull (* TODO: fix this *)
+    | _ -> failwith "invalid global expression"
   in
   let gdecl = (ll_ty, ginit) in
   (gdecl, [])
