@@ -341,10 +341,27 @@ and cmp_binop (c:Ctxt.t) (bop:binop) (exp1:Ast.exp node) (exp2:Ast.exp node) : L
     | Ast.Add | Ast.Sub | Ast.Mul | Ast.IAnd | Ast.IOr | Ast.Shl | Ast.Shr | Ast.Sar -> cmp_ty TInt
   in
   let insn = match bop with
-    | Add -> Ll.Binop (Add, dest_ty, ll_op_1, ll_op_2)
-    | _ -> failwith "unimplemented cmp_binop"
+    | Add -> Ll.Binop (Add, ll_ty_1, ll_op_1, ll_op_2)
+    | Sub -> Ll.Binop (Sub, ll_ty_1, ll_op_1, ll_op_2)
+    | Mul -> Ll.Binop (Mul, ll_ty_1, ll_op_1, ll_op_2)
+    | IAnd -> Ll.Binop (And, ll_ty_1, ll_op_1, ll_op_2)
+    | IOr -> Ll.Binop (Or, ll_ty_1, ll_op_1, ll_op_2)
+    | Shl -> Ll.Binop (Shl, ll_ty_1, ll_op_1, ll_op_2)
+    | Shr -> Ll.Binop (Lshr, ll_ty_1, ll_op_1, ll_op_2)
+    | Sar -> Ll.Binop (Ashr, ll_ty_1, ll_op_1, ll_op_2)
+
+    | Eq -> Ll.Icmp (Eq, ll_ty_1, ll_op_1, ll_op_2)
+    | Neq -> Ll.Icmp (Ne, ll_ty_1, ll_op_1, ll_op_2)
+    | Lt -> Ll.Icmp (Slt, ll_ty_1, ll_op_1, ll_op_2)
+    | Lte -> Ll.Icmp (Sle, ll_ty_1, ll_op_1, ll_op_2)
+    | Gt -> Ll.Icmp (Sgt, ll_ty_1, ll_op_1, ll_op_2)
+    | Gte -> Ll.Icmp (Sge, ll_ty_1, ll_op_1, ll_op_2)
+
+    | And -> Ll.Binop (And, ll_ty_1, ll_op_1, ll_op_2)
+    | Or -> Ll.Binop (Or, ll_ty_1, ll_op_1, ll_op_2)
   in
   (dest_ty, Id dest_uid, (I (dest_uid, insn)) :: stream_1 @ stream_2)
+
     
 (* Compile a statement in context c with return typ rt. Return a new context,
    possibly extended with new local bindings, and the instruction stream
