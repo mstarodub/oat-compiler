@@ -306,9 +306,11 @@ let oat_alloc_array (t:Ast.ty) (size:Ll.operand) : Ll.ty * operand * stream =
 
 *)
 
-let rec cmp_exp (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.operand * stream =
-  failwith "cmp_exp unimplemented"
-
+let rec cmp_exp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * stream =
+  match exp with
+    | CInt i -> (I64, Const i, [])
+    | _ -> failwith "cmp_exp unimplemented"
+  
 (* Compile a statement in context c with return typ rt. Return a new context,
    possibly extended with new local bindings, and the instruction stream
    implementing the statement.
@@ -336,8 +338,16 @@ let rec cmp_exp (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.operand * stream =
 
  *)
 
-let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt.t * stream =
-  failwith "cmp_stmt not implemented"
+let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * stream =
+  match stmt with
+    | Ret None -> (c, [T (Ret (rt, None))])
+    | Ret (Some exp) ->
+        let (ty, op, stream) = cmp_exp c exp in
+        if ty != rt then failwith (String.concat " " ["Type mismatch between"; Llutil.string_of_ty ty; "and"; Llutil.string_of_ty rt]);
+        let ret = [T (Ret (rt, Some op))] in
+        (c, stream @ ret)
+    | _ -> failwith "cmp_stmt not implemented"
+  
 
 (* Compile a series of statements *)
 and cmp_block (c:Ctxt.t) (rt:Ll.ty) (stmts:Ast.block) : Ctxt.t * stream =
@@ -398,8 +408,59 @@ let cmp_global_ctxt (c:Ctxt.t) (p:Ast.prog) : Ctxt.t =
    5. Use cfg_of_stream to produce a LLVMlite cfg from
  *)
 
+let rec zip3 (a:'a list) (b: 'b list) (c: 'c list) : ('a * 'b * 'c) list =
+  begin match a with
+    | [] -> []
+    | (x::xs) -> begin match b with
+      | [] -> []
+      | (y::ys) -> begin match c with
+        | [] -> []
+        | (z::zs) -> (x, y, z) :: (zip3 xs ys zs)
+      end
+    end
+  end
+
 let cmp_fdecl (c:Ctxt.t) ({elt=f; _}:Ast.fdecl node) : Ll.fdecl * (Ll.gid * Ll.gdecl) list =
-  failwith "unimplemented cmp_fdecl"
+  let { frtyp; fname; args; body } = f in
+  let (arg_tys, arg_ids) = List.split args in
+
+  (* Argument values *)
+  let arg_ll_tys = List.map cmp_ty arg_tys in
+  let arg_uids_src = List.map (fun s -> gensym @@ String.concat "_" [fname; s]) arg_ids in
+  let arg_ops_src = List.map (fun uid -> Ll.Id uid) arg_uids_src in
+
+  (* Argument pointers *)
+  let arg_ll_ptr_tys = List.map (fun ty -> Ptr (ty)) arg_ll_tys in
+  let arg_uids_dest = List.map (fun s -> gensym @@ String.concat "_" [fname; s]) arg_ids in
+  let arg_ops_dest = List.map (fun uid -> Ll.Id uid) arg_uids_dest in
+
+  (* LL function parameters and type signature *)
+  let ll_f_param = arg_uids_src in
+  let ll_rty = cmp_ret_ty frtyp in
+  let ll_f_ty = (arg_ll_tys, ll_rty) in
+
+  (* Allocas *)
+  let allocas = List.map (fun ll_ty -> Alloca ll_ty) arg_ll_tys in
+  let alloca_insns = List.combine arg_uids_dest allocas in
+  
+  (* Stores *)
+  let store_args = zip3 arg_ll_tys arg_ops_src arg_ops_dest in
+  let stores = List.map (fun (ll_ty, src, dest) -> Store (ll_ty, src, dest)) store_args in
+  let store_syms = List.init (List.length stores) (fun i -> gensym "store") in
+  let store_insns = List.combine store_syms stores in
+
+  (* Update context *)
+  let bindings = List.combine arg_ids @@ List.combine arg_ll_ptr_tys arg_ops_dest in
+  let start_ctxt = List.fold_left (fun c (id, bnd) -> Ctxt.add c id bnd) c bindings in
+
+  (* Compile function body *)
+  let setup_stream = lift (alloca_insns @ store_insns) in
+  let (end_ctxt, stream) = cmp_block start_ctxt ll_rty body in
+
+  (* Create CFG *)
+  let (ll_cfg, gdecls) = cfg_of_stream (setup_stream @ stream) in
+
+  ({ f_ty=ll_f_ty; f_param=ll_f_param; f_cfg=ll_cfg }, gdecls)
 
 (* Compile a global initializer, returning the resulting LLVMlite global
    declaration, and a list of additional global declarations.
