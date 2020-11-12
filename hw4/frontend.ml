@@ -267,6 +267,10 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
 
 let int64_of_bool (b: bool) : int64 = if b then 1L else 0L
 let extract_from_node ({elt; _}:'a node) : 'a = elt
+let deref (ptr:Ll.ty) : Ll.ty =
+  match ptr with
+    | Ptr x -> x
+    | _ -> failwith "tried to deref non-pointer type"
 
 (* Generate a fresh temporary identifier. Since OAT identifiers cannot begin
    with an underscore, these should not clash with any source variables *)
@@ -312,12 +316,18 @@ let rec cmp_exp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * st
     | CNull rty -> (cmp_rty rty, Null, [])
     | CBool b -> (cmp_ty TBool, Const (int64_of_bool b), [])
     | CInt i -> (cmp_ty TInt, Const i, [])
+
     | CStr s -> failwith "cmp_exp unimplemented"
     | CArr (ty, exprs) -> failwith "cmp_exp unimplemented"
     | NewArr (ty, exp) -> failwith "cmp_exp unimplemented"
-    | Id id -> failwith "cmp_exp unimplemented"
+
+    | Id id -> let (ll_ty, ll_op) = Ctxt.lookup id c in
+      let dest_uid = gensym "uop" in
+      (deref ll_ty, Id dest_uid, [I (dest_uid, Ll.Load (ll_ty, ll_op))])
+    
     | Index (exp1, exp2) -> failwith "cmp_exp unimplemented"
     | Call (exp, exprs) -> failwith "cmp_exp unimplemented"
+
     | Bop (bop, exp1, exp2) -> cmp_binop c bop exp1 exp2
     | Uop (uop, exp) -> cmp_uop c uop exp
 
@@ -445,7 +455,7 @@ let cmp_global_ctxt (c:Ctxt.t) (p:Ast.prog) : Ctxt.t =
     | Gfdecl _ -> t
     (* name = exp *)
     | Gvdecl { elt={ name; init={ elt=exp; _ } }; _ } ->
-      Ctxt.add t name (resolve_gexp_type exp, Gid name)
+      Ctxt.add t name (Ptr (resolve_gexp_type exp), Gid name)
   in
   List.fold_left f Ctxt.empty p
 
@@ -483,7 +493,7 @@ let cmp_fdecl (c:Ctxt.t) ({elt=f; _}:Ast.fdecl node) : Ll.fdecl * (Ll.gid * Ll.g
   let arg_ops_src = List.map (fun uid -> Ll.Id uid) arg_uids_src in
 
   (* Argument pointers *)
-  let arg_ll_ptr_tys = List.map (fun ty -> Ptr (ty)) arg_ll_tys in
+  let arg_ll_ptr_tys = List.map (fun ty -> Ptr ty) arg_ll_tys in
   let arg_uids_dest = List.map (fun s -> gensym @@ String.concat "_" [fname; s]) arg_ids in
   let arg_ops_dest = List.map (fun uid -> Ll.Id uid) arg_uids_dest in
 
