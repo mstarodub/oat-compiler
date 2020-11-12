@@ -564,12 +564,31 @@ and cmp_garr (c:Ctxt.t) (ty:Ast.ty) (exprs:Ast.exp node list) : Ll.ginit * (Ll.g
   let arr_ty = Struct [I64; Array (arr_len, cmp_ty ty)] in
   let final_ty = Struct [I64; Array (0, cmp_ty ty)] in
   match ty with
-    | TRef r -> failwith "unimplemented global arrays of reference type"
-    | ty ->
+    | TRef r -> cmp_garr_ref c r exprs
+    | _ ->
       let ginits = exprs |> List.map (cmp_gexp c) |> List.map fst in
       let arr_gdecl = (arr_ty, GStruct [(I64, GInt (Int64.of_int arr_len)); (Array (arr_len, cmp_ty ty), GArray ginits)]) in
       let arr_predecl = [(arr_sym, arr_gdecl)] in
       (GBitcast (Ptr arr_ty, GGid arr_sym, Ptr final_ty), arr_predecl)
+
+and cmp_garr_ref (c:Ctxt.t) (r:Ast.rty) (exprs:Ast.exp node list) : Ll.ginit * (Ll.gid * Ll.gdecl) list =
+  let r_ty = cmp_rty r in
+  let el_ty = Ptr r_ty in
+  let arr_len = List.length exprs in
+  let arr_sym = gensym "garr" in
+  let arr_ty = Struct [I64; Array (arr_len, Ptr el_ty)] in
+  let final_ty = Struct [I64; Array (0, el_ty)] in
+
+  let expr_syms = List.init arr_len (fun i -> gensym "garr_el") in
+  let (expr_gdecls, expr_predecls) = exprs |> List.map (cmp_gexp c) |> List.split in
+  let expr_decls = List.combine expr_syms expr_gdecls in
+
+  let expr_gids = List.map (fun i -> (Ptr el_ty, GGid i)) expr_syms in
+  let arr_gdecl = (arr_ty, GStruct [(I64, GInt (Int64.of_int arr_len)); (Array (arr_len, Ptr el_ty), GArray expr_gids)]) in
+  let arr_predecl = (arr_sym, arr_gdecl) in
+
+  let all_predecls = arr_predecl :: expr_decls @ (List.flatten expr_predecls) in
+  (GBitcast (Ptr arr_ty, GGid arr_sym, Ptr final_ty), all_predecls)
 
 (* Oat internals function context ------------------------------------------- *)
 let internals = [
