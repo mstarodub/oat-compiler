@@ -320,26 +320,28 @@ let cmp_gstr (s:string) : Ll.ginit * (Ll.gid * Ll.gdecl) list =
   let str_predecl = [(str_sym, str_gdecl)] in
   (GBitcast (Ptr str_ty, GGid str_sym, Ptr I8), str_predecl)
 
+let cmp_str_exp (s:string) : Ll.ty * Ll.operand * stream =
+  let ty = cmp_ty (TRef RString) in
+
+  let str_gid = gensym "exp_str" in
+  let (ginit, predecls) = cmp_gstr s in
+  let gdecl = (ty, ginit) in
+  let all_gdecls = (str_gid, gdecl) :: predecls in
+  let g_stream = lift_global all_gdecls in
+
+  let dest_uid = gensym "exp_str" in
+  let load = I (dest_uid, Ll.Load (Ptr ty, Gid str_gid)) in
+
+  let stream = load :: g_stream in
+  (ty, Id dest_uid, stream)
+
 let rec cmp_exp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * stream =
   match exp with
     | CNull rty -> (cmp_ty (TRef rty), Null, [])
     | CBool b -> (cmp_ty TBool, Const (int64_of_bool b), [])
     | CInt i -> (cmp_ty TInt, Const i, [])
 
-    | CStr s ->
-      let ty = cmp_ty (TRef RString) in
-
-      let str_gid = gensym "exp_str" in
-      let (ginit, predecls) = cmp_gstr s in
-      let gdecl = (ty, ginit) in
-      let all_gdecls = (str_gid, gdecl) :: predecls in
-      let g_stream = lift_global all_gdecls in
-
-      let dest_uid = gensym "exp_str" in
-      let load = I (dest_uid, Ll.Load (Ptr ty, Gid str_gid)) in
-
-      let stream = load :: g_stream in
-      (ty, Id dest_uid, stream)
+    | CStr s -> cmp_str_exp s
     
     | CArr (ty, exprs) -> failwith "cmp_exp unimplemented"
     | NewArr (ty, exp) -> failwith "cmp_exp unimplemented"
@@ -429,9 +431,23 @@ let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * 
     | Ret (Some exp) ->
         let (ty, op, stream) = cmp_exp c exp in
         (* TODO: probably can remove this because typechecking isn't required *)
+        (* It's useful for testing though *)
         if ty <> rt then failwith (String.concat " " ["Type mismatch between"; Llutil.string_of_ty ty; "and"; Llutil.string_of_ty rt; ""]);
         let ret = T (Ret (rt, Some op)) in
         (c, ret :: stream)
+
+    | Decl (id, exp) ->
+        let (ty, op, stream) = cmp_exp c exp in
+        let dest_uid = gensym "stmt_decl" in
+        
+        let alloca = E (dest_uid, Alloca ty) in
+        let store = I (gensym "store", Store (ty, op, Id dest_uid)) in
+
+        let new_stream = alloca :: store :: stream in
+        let new_ctxt = Ctxt.add c id (Ptr ty, Id dest_uid) in
+
+        (new_ctxt, new_stream)
+    
     | _ -> failwith "cmp_stmt not implemented"
   
 
