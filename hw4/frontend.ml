@@ -28,6 +28,7 @@ let ( >@ ) x y = y @ x
 let ( >:: ) x y = y :: x
 let lift : (uid * insn) list -> stream = List.rev_map (fun (x,i) -> I (x,i))
 let lift_entry : (uid * insn) list -> stream = List.rev_map (fun (x,i) -> E (x,i))
+let lift_global : (gid * Ll.gdecl) list -> stream = List.rev_map (fun (x,i) -> G (x, i))
 
 (* Build a CFG and collection of global variable definitions from a stream *)
 let cfg_of_stream (code:stream) : Ll.cfg * (Ll.gid * Ll.gdecl) list  =
@@ -311,18 +312,40 @@ let oat_alloc_array (t:Ast.ty) (size:Ll.operand) : Ll.ty * operand * stream =
      (CArr) and the (NewArr) expressions
 
 *)
+let cmp_gstr (s:string) : Ll.ginit * (Ll.gid * Ll.gdecl) list =
+  let str_sym = gensym "gstr" in
+  (* Add 1 to length of string because of null terminator *)
+  let str_ty = Array (1 + (String.length s), I8) in
+  let str_gdecl = (str_ty, GString s) in
+  let str_predecl = [(str_sym, str_gdecl)] in
+  (GBitcast (Ptr str_ty, GGid str_sym, Ptr I8), str_predecl)
+
 let rec cmp_exp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * stream =
   match exp with
-    | CNull rty -> (cmp_rty rty, Null, [])
+    | CNull rty -> (cmp_ty (TRef rty), Null, [])
     | CBool b -> (cmp_ty TBool, Const (int64_of_bool b), [])
     | CInt i -> (cmp_ty TInt, Const i, [])
 
-    | CStr s -> failwith "cmp_exp unimplemented"
+    | CStr s ->
+      let ty = cmp_ty (TRef RString) in
+
+      let str_gid = gensym "exp_str" in
+      let (ginit, predecls) = cmp_gstr s in
+      let gdecl = (ty, ginit) in
+      let all_gdecls = (str_gid, gdecl) :: predecls in
+      let g_stream = lift_global all_gdecls in
+
+      let dest_uid = gensym "exp_str" in
+      let load = I (dest_uid, Ll.Load (Ptr ty, Gid str_gid)) in
+
+      let stream = load :: g_stream in
+      (ty, Id dest_uid, stream)
+    
     | CArr (ty, exprs) -> failwith "cmp_exp unimplemented"
     | NewArr (ty, exp) -> failwith "cmp_exp unimplemented"
 
     | Id id -> let (ll_ty, ll_op) = Ctxt.lookup id c in
-      let dest_uid = gensym "uop" in
+      let dest_uid = gensym "exp_id" in
       (deref ll_ty, Id dest_uid, [I (dest_uid, Ll.Load (ll_ty, ll_op))])
     
     | Index (exp1, exp2) -> failwith "cmp_exp unimplemented"
@@ -333,7 +356,7 @@ let rec cmp_exp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * st
 
 and cmp_uop (c:Ctxt.t) (uop:unop) (exp:Ast.exp node) : Ll.ty * Ll.operand * stream =
   let (ll_ty, ll_op, stream) = cmp_exp c exp in
-  let dest_uid = gensym "uop" in
+  let dest_uid = gensym "exp_uop" in
   let dest_ty = (if uop = Lognot then TBool else TInt) |> cmp_ty in
   let insn = match uop with
     | Neg -> Ll.Binop (Sub, dest_ty, Const 0L, ll_op)
@@ -345,7 +368,7 @@ and cmp_uop (c:Ctxt.t) (uop:unop) (exp:Ast.exp node) : Ll.ty * Ll.operand * stre
 and cmp_binop (c:Ctxt.t) (bop:binop) (exp1:Ast.exp node) (exp2:Ast.exp node) : Ll.ty * Ll.operand * stream =
   let (ll_ty_1, ll_op_1, stream_1) = cmp_exp c exp1 in
   let (ll_ty_2, ll_op_2, stream_2) = cmp_exp c exp2 in
-  let dest_uid = gensym "binop" in
+  let dest_uid = gensym "exp_binop" in
   let dest_ty = match bop with
     | Ast.Eq | Ast.Neq | Ast.Lt | Ast.Lte | Ast.Gt | Ast.Gte | Ast.And | Ast.Or -> cmp_ty TBool
     | Ast.Add | Ast.Sub | Ast.Mul | Ast.IAnd | Ast.IOr | Ast.Shl | Ast.Shr | Ast.Sar -> cmp_ty TInt
@@ -406,7 +429,7 @@ let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * 
     | Ret (Some exp) ->
         let (ty, op, stream) = cmp_exp c exp in
         (* TODO: probably can remove this because typechecking isn't required *)
-        if ty != rt then failwith (String.concat " " ["Type mismatch between"; Llutil.string_of_ty ty; "and"; Llutil.string_of_ty rt]);
+        if ty <> rt then failwith (String.concat " " ["Type mismatch between"; Llutil.string_of_ty ty; "and"; Llutil.string_of_ty rt; ""]);
         let ret = T (Ret (rt, Some op)) in
         (c, ret :: stream)
     | _ -> failwith "cmp_stmt not implemented"
@@ -550,14 +573,6 @@ let rec cmp_gexp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.gdecl * (Ll.gid * L
   let gdecl = (ll_ty, ginit) in
   (gdecl, predecls)
 
-and cmp_gstr (s:string) : Ll.ginit * (Ll.gid * Ll.gdecl) list =
-  let str_sym = gensym "gstr" in
-  (* Add 1 to length of string because of null terminator *)
-  let str_ty = Array (1 + (String.length s), I8) in
-  let str_gdecl = (str_ty, GString s) in
-  let str_predecl = [(str_sym, str_gdecl)] in
-  (GBitcast (Ptr str_ty, GGid str_sym, Ptr I8), str_predecl)
-
 and cmp_garr (c:Ctxt.t) (ty:Ast.ty) (exprs:Ast.exp node list) : Ll.ginit * (Ll.gid * Ll.gdecl) list =
   let arr_len = List.length exprs in
   let arr_sym = gensym "garr" in
@@ -566,8 +581,8 @@ and cmp_garr (c:Ctxt.t) (ty:Ast.ty) (exprs:Ast.exp node list) : Ll.ginit * (Ll.g
   match ty with
     | TRef r -> cmp_garr_ref c r exprs
     | _ ->
-      let ginits = exprs |> List.map (cmp_gexp c) |> List.map fst in
-      let arr_gdecl = (arr_ty, GStruct [(I64, GInt (Int64.of_int arr_len)); (Array (arr_len, cmp_ty ty), GArray ginits)]) in
+      let gdecls = exprs |> List.map (cmp_gexp c) |> List.map fst in
+      let arr_gdecl = (arr_ty, GStruct [(I64, GInt (Int64.of_int arr_len)); (Array (arr_len, cmp_ty ty), GArray gdecls)]) in
       let arr_predecl = [(arr_sym, arr_gdecl)] in
       (GBitcast (Ptr arr_ty, GGid arr_sym, Ptr final_ty), arr_predecl)
 
