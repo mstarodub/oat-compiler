@@ -539,18 +539,37 @@ let cmp_fdecl (c:Ctxt.t) ({elt=f; _}:Ast.fdecl node) : Ll.fdecl * (Ll.gid * Ll.g
 
 let rec cmp_gexp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.gdecl * (Ll.gid * Ll.gdecl) list =
   let ll_ty = resolve_gexp_type exp in
-  let ginit = match exp with
-    | CNull rty -> GNull
-    | CBool b -> GInt (int64_of_bool b)
-    | CInt i -> GInt i
-    | CStr s -> GString s
-    | CArr (ty, exp_nodes) ->
-      let exps = List.map extract_from_node exp_nodes in
-      GNull (* TODO: fix this *)
+  let (ginit, predecls) = match exp with
+    | CNull rty -> (GNull, [])
+    | CBool b -> (GInt (int64_of_bool b), [])
+    | CInt i -> (GInt i, [])
+    | CStr s -> cmp_gstr s
+    | CArr (ty, exprs) -> cmp_garr c ty exprs
     | _ -> failwith "invalid global expression"
   in
   let gdecl = (ll_ty, ginit) in
-  (gdecl, [])
+  (gdecl, predecls)
+
+and cmp_gstr (s:string) : Ll.ginit * (Ll.gid * Ll.gdecl) list =
+  let str_sym = gensym "gstr" in
+  (* Add 1 to length of string because of null terminator *)
+  let str_ty = Array (1 + (String.length s), I8) in
+  let str_gdecl = (str_ty, GString s) in
+  let str_predecl = [(str_sym, str_gdecl)] in
+  (GBitcast (Ptr str_ty, GGid str_sym, Ptr I8), str_predecl)
+
+and cmp_garr (c:Ctxt.t) (ty:Ast.ty) (exprs:Ast.exp node list) : Ll.ginit * (Ll.gid * Ll.gdecl) list =
+  let arr_len = List.length exprs in
+  let arr_sym = gensym "garr" in
+  let arr_ty = Struct [I64; Array (arr_len, cmp_ty ty)] in
+  let final_ty = Struct [I64; Array (0, cmp_ty ty)] in
+  match ty with
+    | TRef r -> failwith "unimplemented global arrays of reference type"
+    | ty ->
+      let ginits = exprs |> List.map (cmp_gexp c) |> List.map fst in
+      let arr_gdecl = (arr_ty, GStruct [(I64, GInt (Int64.of_int arr_len)); (Array (arr_len, cmp_ty ty), GArray ginits)]) in
+      let arr_predecl = [(arr_sym, arr_gdecl)] in
+      (GBitcast (Ptr arr_ty, GGid arr_sym, Ptr final_ty), arr_predecl)
 
 (* Oat internals function context ------------------------------------------- *)
 let internals = [
