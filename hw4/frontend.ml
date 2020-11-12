@@ -343,18 +343,40 @@ let rec cmp_exp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * st
 
     | CStr s -> cmp_str_exp s
     
-    | CArr (ty, exprs) -> failwith "cmp_exp unimplemented"
-    | NewArr (ty, exp) -> failwith "cmp_exp unimplemented"
+    | CArr (ty, exprs) -> failwith "cmp_exp unimplemented CArr"
+    | NewArr (ty, exp) -> failwith "cmp_exp unimplemented NewArr"
 
     | Id id -> let (ll_ty, ll_op) = Ctxt.lookup id c in
       let dest_uid = gensym "exp_id" in
       (deref ll_ty, Id dest_uid, [I (dest_uid, Ll.Load (ll_ty, ll_op))])
     
-    | Index (exp1, exp2) -> failwith "cmp_exp unimplemented"
-    | Call (exp, exprs) -> failwith "cmp_exp unimplemented"
+    | Index (exp1, exp2) -> cmp_index c exp1 exp2
+
+    | Call (exp, exprs) -> failwith "cmp_exp unimplemented Call"
 
     | Bop (bop, exp1, exp2) -> cmp_binop c bop exp1 exp2
     | Uop (uop, exp) -> cmp_uop c uop exp
+
+and cmp_index (c:Ctxt.t) (exp1:Ast.exp node) (exp2:Ast.exp node) : Ll.ty * Ll.operand * stream =
+  let (ll_ty_1, ll_op_1, stream_1) = cmp_exp c exp1 in
+  let (ll_ty_2, ll_op_2, stream_2) = cmp_exp c exp2 in
+
+  let ptr_uid = gensym "exp_index" in
+  let el_ty = match ll_ty_1 with
+    | Ptr (Struct [I64; Array (0, ty)]) -> ty
+    (* TODO: Can remove this eventually, is useful for testing *)
+    | _ -> failwith (String.concat " " ["Cannot index to non-array type"; Llutil.string_of_ty ll_ty_1; ""])
+  in
+  (* gep ty op 0 1 index *)
+  let gep = Gep (ll_ty_1, ll_op_1, [Const 0L; Const 1L; ll_op_2]) in
+  let gep_insn = I (ptr_uid, gep) in
+
+  let val_uid = gensym "exp_index" in
+  let load = Load (Ptr el_ty, Id ptr_uid) in
+  let load_insn = I (val_uid, load) in
+
+  let new_stream = load_insn :: gep_insn :: (stream_1 @ stream_2) in
+  (el_ty, Id val_uid, new_stream)
 
 and cmp_uop (c:Ctxt.t) (uop:unop) (exp:Ast.exp node) : Ll.ty * Ll.operand * stream =
   let (ll_ty, ll_op, stream) = cmp_exp c exp in
@@ -439,7 +461,7 @@ let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * 
     | Decl (id, exp) ->
         let (ty, op, stream) = cmp_exp c exp in
         let dest_uid = gensym "stmt_decl" in
-        
+
         let alloca = E (dest_uid, Alloca ty) in
         let store = I (gensym "store", Store (ty, op, Id dest_uid)) in
 
