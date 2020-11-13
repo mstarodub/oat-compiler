@@ -266,8 +266,26 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
 
 (* Some useful helper functions *)
 
+let rec zip3 (a:'a list) (b: 'b list) (c: 'c list) : ('a * 'b * 'c) list =
+  begin match a with
+    | [] -> []
+    | (x::xs) -> begin match b with
+      | [] -> []
+      | (y::ys) -> begin match c with
+        | [] -> []
+        | (z::zs) -> (x, y, z) :: (zip3 xs ys zs)
+      end
+    end
+  end
+
+let rec split3 (l: ('a * 'b * 'c) list) : 'a list * 'b list * 'c list =
+  match l with
+    | [] -> ([], [], [])
+    | (x, y, z)::tl -> 
+      let (xs, ys, zs) = split3 tl in
+      (x::xs, y::ys, z::zs)
+
 let int64_of_bool (b: bool) : int64 = if b then 1L else 0L
-let extract_from_node ({elt; _}:'a node) : 'a = elt
 let deref (ptr:Ll.ty) : Ll.ty =
   match ptr with
     | Ptr x -> x
@@ -343,8 +361,34 @@ let rec cmp_exp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * st
 
     | CStr s -> cmp_str_exp s
     
-    | CArr (ty, exprs) -> failwith "cmp_exp unimplemented CArr"
-    | NewArr (ty, exp) -> failwith "cmp_exp unimplemented NewArr"
+    | CArr (ty, exprs) ->
+      (* allocate array *)
+      let size = List.length exprs in
+      let (arr_ty, arr_op, arr_stream) = oat_alloc_array ty (Const (Int64.of_int size)) in
+      
+      (* compile expressions *)
+      let cmp_exprs = List.map (cmp_exp c) exprs in
+      let (expr_tys, expr_ops, expr_streams) = split3 cmp_exprs in
+
+      (* move expressions into corresponding array slots *)
+      let gep_of_index i = Gep (arr_ty, arr_op, [Const 0L; Const 1L; Const (Int64.of_int i)]) in
+      let ptr_uids = List.init size (fun i -> gensym "exp_carr") in
+      let geps = List.init size gep_of_index in
+
+      let named_geps = List.combine ptr_uids geps in
+      let gep_insns = List.map (fun (ptr_uid, gep) -> I (ptr_uid, gep)) named_geps in
+
+      let store_args = zip3 expr_tys expr_ops ptr_uids in
+      let stores = List.map (fun (ty, op, dest_uid) -> Store (ty, op, Id dest_uid)) store_args in
+      let store_insns = List.map (fun i -> I (gensym "store", i)) stores in
+
+      let new_stream = store_insns @ gep_insns @ (List.flatten expr_streams) @ arr_stream in
+      (arr_ty, arr_op, new_stream)
+
+    | NewArr (ty, exp) -> 
+      let (exp_ty, exp_op, exp_stream) = cmp_exp c exp in
+      let (arr_ty, arr_op, arr_stream) = oat_alloc_array ty exp_op in
+      (arr_ty, arr_op, arr_stream @ exp_stream)
 
     | Id id -> let (ll_ty, ll_op) = Ctxt.lookup id c in
       let dest_uid = gensym "exp_id" in
@@ -560,18 +604,6 @@ let cmp_global_ctxt (c:Ctxt.t) (p:Ast.prog) : Ctxt.t =
    4. Compile the body of the function using cmp_block
    5. Use cfg_of_stream to produce a LLVMlite cfg from
  *)
-
-let rec zip3 (a:'a list) (b: 'b list) (c: 'c list) : ('a * 'b * 'c) list =
-  begin match a with
-    | [] -> []
-    | (x::xs) -> begin match b with
-      | [] -> []
-      | (y::ys) -> begin match c with
-        | [] -> []
-        | (z::zs) -> (x, y, z) :: (zip3 xs ys zs)
-      end
-    end
-  end
 
 let cmp_fdecl (c:Ctxt.t) ({elt=f; _}:Ast.fdecl node) : Ll.fdecl * (Ll.gid * Ll.gdecl) list =
   let { frtyp; fname; args; body } = f in
