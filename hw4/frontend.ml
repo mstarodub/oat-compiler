@@ -270,7 +270,6 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
 
 
 (* Some useful helper functions *)
-
 let rec zip3 (a:'a list) (b: 'b list) (c: 'c list) : ('a * 'b * 'c) list =
   begin match a with
     | [] -> []
@@ -291,6 +290,7 @@ let rec split3 (l: ('a * 'b * 'c) list) : 'a list * 'b list * 'c list =
       (x::xs, y::ys, z::zs)
 
 let int64_of_bool (b: bool) : int64 = if b then 1L else 0L
+
 let deref (ptr:Ll.ty) : Ll.ty =
   match ptr with
     | Ptr x -> x
@@ -612,12 +612,12 @@ let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * 
       let post_lbl = gensym "stmt_if_post" in
 
       let (cnd_ty, cnd_op, cnd_stream) = cmp_exp c exp in
-      let cbr = Ll.Cbr (cnd_op, if_lbl, else_lbl) in
+      let cbr = Ll.Cbr (cnd_op, if_lbl, if has_else_block then else_lbl else post_lbl) in
       let br = Ll.Br post_lbl in
 
-      let f (c, stream) stmt = let (new_c, new_stream) = cmp_stmt c rt stmt in (new_c, new_stream @ stream) in
-      let (_, s1_stream) = List.fold_left f (c, []) stmts1 in
-      let (_, s2_stream) = List.fold_left f (c, []) stmts2 in
+      (* new context is thrown away after leaving block scope *)
+      let (_, s1_stream) = cmp_block c rt stmts1 in
+      let (_, s2_stream) = cmp_block c rt stmts2 in
 
       let cbr_el = T cbr in
       let if_el = L if_lbl in
@@ -627,14 +627,77 @@ let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * 
 
       let cnd_block = cbr_el :: cnd_stream in
       let if_block = br_el :: s1_stream @ [if_el] in
-      let else_block = br_el :: s2_stream @ [else_el]in
+      let else_block = if has_else_block then br_el :: s2_stream @ [else_el] else [] in
 
       let final_stream = post_el :: (else_block @ if_block @ cnd_block) in
       (c, final_stream)
-  
-    | For (vdecls, opt_exp, opt_stmt, stmts) -> failwith "cmp_stmt unimplemented For"
-    | While (exp, stmts) -> failwith "cmp_stmt unimplemented While"
-  
+
+    (* while statement compiles to something like this:
+        br cnd
+        LBL cnd
+        cnd = ...
+        CBR cnd while post
+        LBL while
+          body
+          br cnd
+        LBL post
+    *)
+    | While (exp, stmts) ->
+      let cnd_lbl = gensym "stmt_while_cnd" in
+      let while_lbl = gensym "stmt_while" in
+      let post_lbl = gensym "stmt_while_post" in
+
+      let (cnd_ty, cnd_op, cnd_stream) = cmp_exp c exp in
+      let cbr = Ll.Cbr (cnd_op, while_lbl, post_lbl) in
+      let br = Ll.Br cnd_lbl in
+
+      (* new context is thrown away after leaving block scope *)
+      let (_, body_stream) = cmp_block c rt stmts in
+      
+      let br_el = T br in
+      let cnd_el = L cnd_lbl in
+      let cbr_el = T cbr in
+      let while_el = L while_lbl in
+      let post_el = L post_lbl in
+
+      let cnd_block = cbr_el :: cnd_stream @ [cnd_el; br_el] in
+      let while_block = br_el :: body_stream @ [while_el] in
+      
+      let final_stream = post_el :: (while_block @ cnd_block) in
+      (c, final_stream)
+
+    (* TODO: determine what a for loop without a condition means *)
+    (* for loop compiles to something like this:
+      vdecls
+      while (cnd)
+        body
+        stmt
+    *)
+    | For (vdecls, opt_exp, opt_stmt, stmts) ->
+      (* Interpret no condition as an infinite loop *)
+      let exp = match opt_exp with
+        | Some exp -> exp
+        | None -> no_loc (CBool true)
+      in
+
+      (* declare variables *)
+      let vdecl_stmts = List.map (fun vdecl -> no_loc (Decl vdecl)) vdecls in
+      let (new_ctxt, vdecl_stream) = cmp_block c rt vdecl_stmts in
+
+      (* append stmt to while body *)
+      let stmt = match opt_stmt with
+        | Some stmt -> [stmt]
+        | None -> []
+      in
+      let while_body = stmts @ stmt in
+
+      (* compile while block in new context*)
+      let while_stmt = While (exp, while_body) in
+      let (_, while_stream) = cmp_stmt new_ctxt rt (no_loc while_stmt) in
+
+      (* throw away context after block scope *)
+      (c, while_stream @ vdecl_stream)
+
 
 (* Compile a series of statements *)
 and cmp_block (c:Ctxt.t) (rt:Ll.ty) (stmts:Ast.block) : Ctxt.t * stream =
