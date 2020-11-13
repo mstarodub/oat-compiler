@@ -84,6 +84,11 @@ module Ctxt = struct
   let lookup_function_option (id:Ast.id) (c:t) : (Ll.ty * Ll.operand) option =
     try Some (lookup_function id c) with _ -> None
 
+  (* TODO: remove later *)
+  let print_context (c:t) : unit =
+    let print_entry (id, (ty, op)) = print_endline @@ String.concat " " [id; Llutil.string_of_ty ty; Llutil.string_of_operand op] in
+    List.map print_entry c; ()
+
 end
 
 (* compiling OAT types ------------------------------------------------------ *)
@@ -396,7 +401,31 @@ let rec cmp_exp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * st
     
     | Index (exp1, exp2) -> cmp_index c exp1 exp2
 
-    | Call (exp, exprs) -> failwith "cmp_exp unimplemented Call"
+    | Call ({elt=exp; _}, exprs) -> 
+      let f_id = match exp with
+        | Id id -> id
+        | _ -> failwith "Cannot call non-identifier type"
+      in
+      let (f_ty, f_op) = Ctxt.lookup f_id c in
+
+      (* compile expressions *)
+      let cmp_exprs = List.map (cmp_exp c) exprs in
+      let (expr_tys, expr_ops, expr_streams) = split3 cmp_exprs in
+
+      (* determine return type *)
+      let dest_uid = gensym "exp_call" in
+      let dest_ty = match f_ty with
+        | Ptr (Fun (_, rty)) -> rty
+        | _ -> failwith @@ String.concat " " ["Cannot call non-function type"; Llutil.string_of_ty f_ty]
+      in
+
+      (* create call instruction *)
+      let expr_ty_ops = List.combine expr_tys expr_ops in
+      let call = Ll.Call (dest_ty, f_op, expr_ty_ops) in
+      let call_insn = I (dest_uid, call) in
+
+      let new_stream = call_insn :: (List.flatten expr_streams) in
+      (dest_ty, Id dest_uid, new_stream)
 
     | Bop (bop, exp1, exp2) -> cmp_binop c bop exp1 exp2
     | Uop (uop, exp) -> cmp_uop c uop exp
@@ -591,7 +620,7 @@ let cmp_global_ctxt (c:Ctxt.t) (p:Ast.prog) : Ctxt.t =
     | Gvdecl { elt={ name; init={ elt=exp; _ } }; _ } ->
       Ctxt.add t name (Ptr (resolve_gexp_type exp), Gid name)
   in
-  List.fold_left f Ctxt.empty p
+  List.fold_left f c p
 
 (* Compile a function declaration in global context c. Return the LLVMlite cfg
    and a list of global declarations containing the string literals appearing
