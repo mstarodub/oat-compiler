@@ -358,25 +358,14 @@ let rec cmp_exp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * st
     | Uop (uop, exp) -> cmp_uop c uop exp
 
 and cmp_index (c:Ctxt.t) (exp1:Ast.exp node) (exp2:Ast.exp node) : Ll.ty * Ll.operand * stream =
-  let (ll_ty_1, ll_op_1, stream_1) = cmp_exp c exp1 in
-  let (ll_ty_2, ll_op_2, stream_2) = cmp_exp c exp2 in
-
-  let ptr_uid = gensym "exp_index" in
-  let el_ty = match ll_ty_1 with
-    | Ptr (Struct [I64; Array (0, ty)]) -> ty
-    (* TODO: Can remove this eventually, is useful for testing *)
-    | _ -> failwith (String.concat " " ["Cannot index to non-array type"; Llutil.string_of_ty ll_ty_1; ""])
-  in
-  (* gep ty op 0 1 index *)
-  let gep = Gep (ll_ty_1, ll_op_1, [Const 0L; Const 1L; ll_op_2]) in
-  let gep_insn = I (ptr_uid, gep) in
+  let (ptr_ty, ptr_op, ptr_stream) = cmp_lhs c (no_loc (Index (exp1, exp2))) in
 
   let val_uid = gensym "exp_index" in
-  let load = Load (Ptr el_ty, Id ptr_uid) in
+  let load = Load (ptr_ty, ptr_op) in
   let load_insn = I (val_uid, load) in
 
-  let new_stream = load_insn :: gep_insn :: (stream_1 @ stream_2) in
-  (el_ty, Id val_uid, new_stream)
+  let new_stream = load_insn :: (ptr_stream) in
+  (deref ptr_ty, Id val_uid, new_stream)
 
 and cmp_uop (c:Ctxt.t) (uop:unop) (exp:Ast.exp node) : Ll.ty * Ll.operand * stream =
   let (ll_ty, ll_op, stream) = cmp_exp c exp in
@@ -418,6 +407,31 @@ and cmp_binop (c:Ctxt.t) (bop:binop) (exp1:Ast.exp node) (exp2:Ast.exp node) : L
     | Or -> Ll.Binop (Or, ll_ty_1, ll_op_1, ll_op_2)
   in
   (dest_ty, Id dest_uid, (I (dest_uid, insn)) :: stream_1 @ stream_2)
+
+and cmp_lhs (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * stream =
+  match exp with
+    | Id id ->
+      let (ty, op) = Ctxt.lookup id c in
+      (ty, op, [])
+
+    | Index (exp1, exp2) ->
+      let (ll_ty_1, ll_op_1, stream_1) = cmp_exp c exp1 in
+      let (ll_ty_2, ll_op_2, stream_2) = cmp_exp c exp2 in
+
+      let ptr_uid = gensym "exp_index" in
+      let el_ty = match ll_ty_1 with
+        | Ptr (Struct [I64; Array (0, ty)]) -> ty
+        (* TODO: Can remove this eventually, is useful for testing *)
+        | _ -> failwith (String.concat " " ["Cannot index to non-array type"; Llutil.string_of_ty ll_ty_1; ""])
+      in
+      (* gep ty op 0 1 index *)
+      let gep = Gep (ll_ty_1, ll_op_1, [Const 0L; Const 1L; ll_op_2]) in
+      let gep_insn = I (ptr_uid, gep) in
+
+      let new_stream = gep_insn :: (stream_1 @ stream_2) in
+      (Ptr el_ty, Id ptr_uid, new_stream)
+    
+    | _ -> failwith "invalid lhs expression"
 
     
 (* Compile a statement in context c with return typ rt. Return a new context,
@@ -470,7 +484,22 @@ let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * 
 
         (new_ctxt, new_stream)
     
-    | _ -> failwith "cmp_stmt not implemented"
+    | Assn (exp1, exp2) ->
+      let (lhs_ty, lhs_op, lhs_stream) = cmp_lhs c exp1 in
+      let (rhs_ty, rhs_op, rhs_stream) = cmp_exp c exp2 in
+      (* TODO: probably can remove this because typechecking isn't required *)
+      (* It's useful for testing though *)
+      if lhs_ty <> Ptr (rhs_ty) then failwith (String.concat " " ["Cannot assign, type mismatch between"; Llutil.string_of_ty lhs_ty; "and"; Llutil.string_of_ty rhs_ty; ""]);
+        
+      let store = I (gensym "store", Store (rhs_ty, rhs_op, lhs_op)) in
+      let new_stream = store :: (lhs_stream @ rhs_stream) in
+
+      (c, new_stream)
+
+    | SCall (exp, exprs) -> failwith "cmp_stmt unimplemented SCall"
+    | If (exp, stmts1, stmts2) -> failwith "cmp_stmt unimplemented If"
+    | For (vdecls, opt_exp, opt_stmt, stmts) -> failwith "cmp_stmt unimplemented For"
+    | While (exp, stmts) -> failwith "cmp_stmt unimplemented While"
   
 
 (* Compile a series of statements *)
