@@ -594,7 +594,44 @@ let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * 
       let new_stream = call_insn :: (List.flatten expr_streams) in
       (c, new_stream)
 
-    | If (exp, stmts1, stmts2) -> failwith "cmp_stmt unimplemented If"
+    (* if statement compiles to something like this:
+        cnd = ...
+        CBR cnd if else
+        LBL if
+          S1
+          br post
+        LBL else
+          S2
+          br post
+        LBL post
+    *)
+    | If (exp, stmts1, stmts2) ->
+      let has_else_block = List.length stmts2 > 0 in
+      let if_lbl = gensym "stmt_if_t" in
+      let else_lbl = gensym "stmt_if_f" in
+      let post_lbl = gensym "stmt_if_post" in
+
+      let (cnd_ty, cnd_op, cnd_stream) = cmp_exp c exp in
+      let cbr = Ll.Cbr (cnd_op, if_lbl, else_lbl) in
+      let br = Ll.Br post_lbl in
+
+      let f (c, stream) stmt = let (new_c, new_stream) = cmp_stmt c rt stmt in (new_c, new_stream @ stream) in
+      let (_, s1_stream) = List.fold_left f (c, []) stmts1 in
+      let (_, s2_stream) = List.fold_left f (c, []) stmts2 in
+
+      let cbr_el = T cbr in
+      let if_el = L if_lbl in
+      let br_el = T br in
+      let else_el = L else_lbl in
+      let post_el = L post_lbl in
+
+      let cnd_block = cbr_el :: cnd_stream in
+      let if_block = br_el :: s1_stream @ [if_el] in
+      let else_block = br_el :: s2_stream @ [else_el]in
+
+      let final_stream = post_el :: (else_block @ if_block @ cnd_block) in
+      (c, final_stream)
+  
     | For (vdecls, opt_exp, opt_stmt, stmts) -> failwith "cmp_stmt unimplemented For"
     | While (exp, stmts) -> failwith "cmp_stmt unimplemented While"
   
