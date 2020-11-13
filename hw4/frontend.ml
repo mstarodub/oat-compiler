@@ -401,7 +401,7 @@ let rec cmp_exp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * st
     
     | Index (exp1, exp2) -> cmp_index c exp1 exp2
 
-    | Call ({elt=exp; _}, exprs) -> 
+    | Call ({elt=exp; _}, exprs) ->
       let f_id = match exp with
         | Id id -> id
         | _ -> failwith "Cannot call non-identifier type"
@@ -569,7 +569,31 @@ let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * 
 
       (c, new_stream)
 
-    | SCall (exp, exprs) -> failwith "cmp_stmt unimplemented SCall"
+    | SCall ({elt=exp; _}, exprs) ->
+      let f_id = match exp with
+        | Id id -> id
+        | _ -> failwith "Cannot call non-identifier type"
+      in
+      let (f_ty, f_op) = Ctxt.lookup f_id c in
+
+      (* compile expressions *)
+      let cmp_exprs = List.map (cmp_exp c) exprs in
+      let (expr_tys, expr_ops, expr_streams) = split3 cmp_exprs in
+
+      (* determine return type *)
+      let r_ty = match f_ty with
+        | Ptr (Fun (_, rty)) -> rty
+        | _ -> failwith @@ String.concat " " ["Cannot call non-function type"; Llutil.string_of_ty f_ty]
+      in
+
+      (* create call instruction *)
+      let expr_ty_ops = List.combine expr_tys expr_ops in
+      let call = Ll.Call (r_ty, f_op, expr_ty_ops) in
+      let call_insn = I (gensym "stmt_scall", call) in
+
+      let new_stream = call_insn :: (List.flatten expr_streams) in
+      (c, new_stream)
+
     | If (exp, stmts1, stmts2) -> failwith "cmp_stmt unimplemented If"
     | For (vdecls, opt_exp, opt_stmt, stmts) -> failwith "cmp_stmt unimplemented For"
     | While (exp, stmts) -> failwith "cmp_stmt unimplemented While"
