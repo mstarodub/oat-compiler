@@ -84,11 +84,6 @@ module Ctxt = struct
   let lookup_function_option (id:Ast.id) (c:t) : (Ll.ty * Ll.operand) option =
     try Some (lookup_function id c) with _ -> None
 
-  (* TODO: remove later *)
-  let print_context (c:t) : unit =
-    let print_entry (id, (ty, op)) = print_endline @@ String.concat " " [id; Llutil.string_of_ty ty; Llutil.string_of_operand op] in
-    List.map print_entry c; ()
-
 end
 
 (* compiling OAT types ------------------------------------------------------ *)
@@ -494,7 +489,6 @@ and cmp_lhs (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.ty * Ll.operand * stream
       let ptr_uid = gensym "exp_index" in
       let el_ty = match ll_ty_1 with
         | Ptr (Struct [I64; Array (0, ty)]) -> ty
-        (* TODO: Can remove this eventually, is useful for testing *)
         | _ -> failwith (String.concat " " ["Cannot index to non-array type"; Llutil.string_of_ty ll_ty_1; ""])
       in
       (* gep ty op 0 1 index *)
@@ -539,8 +533,6 @@ let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * 
     | Ret None -> (c, [T (Ret (rt, None))])
     | Ret (Some exp) ->
         let (ty, op, stream) = cmp_exp c exp in
-        (* TODO: probably can remove this because typechecking isn't required *)
-        (* It's useful for testing though *)
         if ty <> rt then failwith (String.concat " " ["Type mismatch between"; Llutil.string_of_ty ty; "and"; Llutil.string_of_ty rt; ""]);
         let ret = T (Ret (rt, Some op)) in
         (c, ret :: stream)
@@ -560,8 +552,6 @@ let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * 
     | Assn (exp1, exp2) ->
       let (lhs_ty, lhs_op, lhs_stream) = cmp_lhs c exp1 in
       let (rhs_ty, rhs_op, rhs_stream) = cmp_exp c exp2 in
-      (* TODO: probably can remove this because typechecking isn't required *)
-      (* It's useful for testing though *)
       if lhs_ty <> Ptr (rhs_ty) then failwith (String.concat " " ["Cannot assign, type mismatch between"; Llutil.string_of_ty lhs_ty; "and"; Llutil.string_of_ty rhs_ty; ""]);
         
       let store = I (gensym "store", Store (rhs_ty, rhs_op, lhs_op)) in
@@ -666,13 +656,13 @@ let rec cmp_stmt (c:Ctxt.t) (rt:Ll.ty) ({elt=stmt; _}:Ast.stmt node) : Ctxt.t * 
       let final_stream = post_el :: (while_block @ cnd_block) in
       (c, final_stream)
 
-    (* TODO: determine what a for loop without a condition means *)
     (* for loop compiles to something like this:
       vdecls
       while (cnd)
         body
         stmt
     *)
+    (* a for loop without a condition is for (vdecls; true; stmt)*)
     | For (vdecls, opt_exp, opt_stmt, stmts) ->
       (* Interpret no condition as an infinite loop *)
       let exp = match opt_exp with
