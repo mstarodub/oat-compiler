@@ -802,50 +802,83 @@ let cmp_fdecl (c:Ctxt.t) ({elt=f; _}:Ast.fdecl node) : Ll.fdecl * (Ll.gid * Ll.g
      be an array of pointers to arrays emitted as additional global declarations.
 *)
 
-let rec cmp_gexp (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.gdecl * (Ll.gid * Ll.gdecl) list =
-  let ll_ty = resolve_gexp_type exp in
-  let (ginit, predecls) = match exp with
-    | CNull rty -> (GNull, [])
-    | CBool b -> (GInt (int64_of_bool b), [])
-    | CInt i -> (GInt i, [])
-    | CStr s -> cmp_gstr s
-    | CArr (ty, exprs) -> cmp_garr c ty exprs
+(* This function is an absolute mess and I never want to look at it again *)
+(* Good luck debugging it if it doesn't actually work *)
+let bitcast (input:Ll.gdecl * (Ll.gid * Ll.gdecl) list) (target_type:Ll.ty) : Ll.gdecl * (Ll.gid * Ll.gdecl) list = 
+  let ((ll_ty, ginit), gdecls) = input in
+  let bitcast_sym = gensym "gbitcast" in
+  let bitcast_decl = (bitcast_sym, (ll_ty, ginit)) in
+  let gdecl = (target_type, GBitcast (Ptr ll_ty, GGid bitcast_sym, target_type)) in
+  (gdecl, gdecls @ [bitcast_decl])
+
+let rec cmp_gexp (c:Ctxt.t) (exp_node:Ast.exp node) : Ll.gdecl * (Ll.gid * Ll.gdecl) list =
+  let {elt=exp; _} = exp_node in
+  match exp with
+    | CNull rty -> ((cmp_ty (TRef rty), GNull), [])
+    | CBool b -> cmp_gexp_without_bitcast c exp_node
+    | CInt i -> cmp_gexp_without_bitcast c exp_node
+
+    | CStr s -> bitcast (cmp_gexp_without_bitcast c exp_node) (cmp_ty (TRef RString))
+    | CArr (ty, exprs) -> bitcast (cmp_gexp_without_bitcast c exp_node) (cmp_ty (TRef (RArray ty)))
+
     | _ -> failwith "invalid global expression"
-  in
-  let gdecl = (ll_ty, ginit) in
-  (gdecl, predecls)
 
-and cmp_garr (c:Ctxt.t) (ty:Ast.ty) (exprs:Ast.exp node list) : Ll.ginit * (Ll.gid * Ll.gdecl) list =
-  let arr_len = List.length exprs in
-  let arr_sym = gensym "garr" in
-  let arr_ty = Struct [I64; Array (arr_len, cmp_ty ty)] in
-  let final_ty = Struct [I64; Array (0, cmp_ty ty)] in
-  match ty with
-    | TRef r -> cmp_garr_ref c r exprs
-    | _ ->
-      let gdecls = exprs |> List.map (cmp_gexp c) |> List.map fst in
-      let arr_gdecl = (arr_ty, GStruct [(I64, GInt (Int64.of_int arr_len)); (Array (arr_len, cmp_ty ty), GArray gdecls)]) in
-      let arr_predecl = [(arr_sym, arr_gdecl)] in
-      (GBitcast (Ptr arr_ty, GGid arr_sym, Ptr final_ty), arr_predecl)
+and cmp_gexp_without_bitcast (c:Ctxt.t) ({elt=exp; _}:Ast.exp node) : Ll.gdecl * (Ll.gid * Ll.gdecl) list =
+  match exp with
+    | CNull rty -> ((cmp_ty (TRef rty), GNull), [])
+    | CBool b -> ((cmp_ty TBool, GInt (int64_of_bool b)), [])
+    | CInt i -> ((cmp_ty TInt, GInt i), [])
+    | CStr s -> ((Array (String.length s + 1, I8), GString s), [])
 
-and cmp_garr_ref (c:Ctxt.t) (r:Ast.rty) (exprs:Ast.exp node list) : Ll.ginit * (Ll.gid * Ll.gdecl) list =
-  let r_ty = cmp_rty r in
-  let el_ty = Ptr r_ty in
-  let arr_len = List.length exprs in
-  let arr_sym = gensym "garr" in
-  let arr_ty = Struct [I64; Array (arr_len, Ptr el_ty)] in
-  let final_ty = Struct [I64; Array (0, el_ty)] in
+    | CArr (ty, exprs) -> begin match ty with
+        | TRef rty -> cmp_garr_ref_without_bitcast c rty exprs
+        | ty -> cmp_garr_without_bitcast c ty exprs
+      end
 
-  let expr_syms = List.init arr_len (fun i -> gensym "garr_el") in
-  let (expr_gdecls, expr_predecls) = exprs |> List.map (cmp_gexp c) |> List.split in
+    | _ -> failwith "invalid global expression"
+
+and cmp_garr_without_bitcast (c:Ctxt.t) (ty:Ast.ty) (exprs:Ast.exp node list) : Ll.gdecl * (Ll.gid * Ll.gdecl) list =
+  let cmp_exprs = List.map (cmp_gexp c) exprs in
+  let (expr_gdecls, _) = List.split cmp_exprs in
+  
+  let size = List.length exprs in
+  let size_ty = I64 in
+  let size_ginit = GInt (Int64.of_int size) in
+  let arr_ty = Array(size, cmp_ty ty) in
+  let arr_ginit = GArray expr_gdecls in
+
+  let final_ty = Struct [size_ty; arr_ty] in
+  let final_ginit = GStruct [(size_ty, size_ginit); (arr_ty, arr_ginit)] in
+  let final_gdecl = (final_ty, final_ginit) in
+
+  (final_gdecl, [])
+
+and cmp_garr_ref_without_bitcast (c:Ctxt.t) (rty:Ast.rty) (exprs:Ast.exp node list) : Ll.gdecl * (Ll.gid * Ll.gdecl) list =
+  let cmp_exprs = List.map (cmp_gexp_without_bitcast c) exprs in
+  let (expr_gdecls, expr_predecls) = List.split cmp_exprs in
+
+  let size = List.length exprs in
+  let size_ty = I64 in
+  let size_ginit = GInt (Int64.of_int size) in
+  
+  let el_ty = cmp_rty rty in
+  let arr_ty = Array(size, Ptr (el_ty)) in
+
+  let expr_syms = List.init size (fun i -> gensym "garr_el") in
   let expr_decls = List.combine expr_syms expr_gdecls in
+  let all_decls = (List.flatten expr_predecls) @ expr_decls in
 
-  let expr_gids = List.map (fun i -> (Ptr el_ty, GGid i)) expr_syms in
-  let arr_gdecl = (arr_ty, GStruct [(I64, GInt (Int64.of_int arr_len)); (Array (arr_len, Ptr el_ty), GArray expr_gids)]) in
-  let arr_predecl = (arr_sym, arr_gdecl) in
+  let expr_tys = List.split expr_gdecls |> fst in
+  let expr_stuff = List.combine expr_syms expr_tys in
 
-  let all_predecls = arr_predecl :: expr_decls @ (List.flatten expr_predecls) in
-  (GBitcast (Ptr arr_ty, GGid arr_sym, Ptr final_ty), all_predecls)
+  let expr_gids = List.map (fun (s, ty) -> (Ptr(el_ty), GBitcast(Ptr (ty), GGid s, Ptr(el_ty)))) expr_stuff in
+  let arr_ginit = GArray expr_gids in
+
+  let final_ty = Struct [size_ty; arr_ty] in
+  let final_ginit = GStruct [(size_ty, size_ginit); (arr_ty, arr_ginit)] in
+  let final_gdecl = (final_ty, final_ginit) in
+
+  (final_gdecl, all_decls)
 
 (* Oat internals function context ------------------------------------------- *)
 let internals = [
