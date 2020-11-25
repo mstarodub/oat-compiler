@@ -80,8 +80,8 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
     end
   | RFun (ts1, rt1), RFun (ts2, rt2)
     -> subtype_ret c rt1 rt2
-    && List.length ts1 = List.length ts2
-    && List.fold_left (&&) true @@ List.map (uncurry (subtype c)) (List.combine ts1 ts2)
+      && List.length ts1 = List.length ts2
+      && List.fold_left (&&) true @@ List.map (uncurry (subtype c)) (List.combine ts1 ts2)
   | _ -> false
 
 and subtype_ret (c : Tctxt.t) (t1 : Ast.ret_ty) (t2 : Ast.ret_ty) : bool =
@@ -99,7 +99,7 @@ and subtype_ret (c : Tctxt.t) (t1 : Ast.ret_ty) (t2 : Ast.ret_ty) : bool =
       according to the rules
 
     - the function should fail using the "type_error" helper function if the
-      type is
+      type is not well-formed
 
     - l is just an ast node that provides source location information for
       generating error messages (it's only needed for the type_error generation)
@@ -107,7 +107,26 @@ and subtype_ret (c : Tctxt.t) (t1 : Ast.ret_ty) (t2 : Ast.ret_ty) : bool =
     - tc contains the structure definition context
  *)
 let rec typecheck_ty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.ty) : unit =
-  failwith "todo: implement typecheck_ty"
+  match t with
+  | TInt | TBool -> ()
+  | TRef rt | TNullRef rt -> typecheck_ref l tc rt
+
+and typecheck_ref (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.rty) : unit =
+  match t with
+  | RString -> ()
+  | RArray ty -> typecheck_ty l tc ty
+  | RStruct s
+    -> if lookup_struct_option s tc <> None
+      then ()
+      else raise (type_error l "not a wellformed type")
+  | RFun (ts, ret)
+    -> typecheck_ret l tc ret;
+      List.iter (typecheck_ty l tc) ts
+
+and typecheck_ret (l : 'a Ast.node) (tc : Tctxt.t) (t: Ast.ret_ty) : unit =
+  match t with
+  | RetVoid -> ()
+  | RetVal ty -> typecheck_ty l tc ty
 
 (* typechecking expressions ------------------------------------------------- *)
 (* Typechecks an expression in the typing context c, returns the type of the
