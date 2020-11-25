@@ -41,17 +41,54 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
 (* Decides whether H |- t1 <: t2
     - assumes that H contains the declarations of all the possible struct types
 
-    - you will want to introduce addition (possibly mutually recursive)
+    - you will want to introduce additional (possibly mutually recursive)
       helper functions to implement the different judgments of the subtyping
       relation. We have included a template for subtype_ref to get you started.
       (Don't forget about OCaml's 'and' keyword.)
 *)
+let rec is_prefix_nonempt (xs' : 'a list) (ys' : 'a list) : bool =
+  match xs', ys' with
+  | [], _::_ -> true
+  | _::_, [] | [], [] -> false
+  | x::xs, y::ys -> if x <> y then false else is_prefix_nonempt xs ys
+
+let uncurry f (a, b) = f a b
+let curry f a b = f (a, b)
+
 let rec subtype (c : Tctxt.t) (t1 : Ast.ty) (t2 : Ast.ty) : bool =
-  failwith "todo: subtype"
+  match (t1, t2) with
+  | TInt, TInt
+  | TBool, TBool -> true
+  | TNullRef rt1, TNullRef rt2
+  | TRef rt1, TRef rt2
+  | TRef rt1, TNullRef rt2 -> subtype_ref c rt1 rt2
+  | _ -> false
 
 (* Decides whether H |-r ref1 <: ref2 *)
 and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
-  failwith "todo: subtype_ref"
+  match (t1, t2) with
+  | RString, RString -> true
+  | RArray t1, RArray t2 -> t1 = t2
+  | RStruct s1, RStruct s2
+    -> begin
+      let lk_s1_flist, lk_s2_flist =
+        match lookup_struct_option s1 c, lookup_struct_option s2 c with
+          | Some x, Some y -> (x, y)
+          | None, _ | _, None -> ([], [])
+      in
+        is_prefix_nonempt lk_s2_flist lk_s1_flist
+    end
+  | RFun (ts1, rt1), RFun (ts2, rt2)
+    -> subtype_ret c rt1 rt2
+    && List.length ts1 = List.length ts2
+    && List.fold_left (&&) true @@ List.map (uncurry (subtype c)) (List.combine ts1 ts2)
+  | _ -> false
+
+and subtype_ret (c : Tctxt.t) (t1 : Ast.ret_ty) (t2 : Ast.ret_ty) : bool =
+  match (t1, t2) with
+  | RetVoid, RetVoid -> true
+  | RetVal ty1, RetVal ty2 -> subtype c ty1 ty2
+  | _ -> false
 
 
 (* well-formed types -------------------------------------------------------- *)
