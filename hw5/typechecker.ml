@@ -55,6 +55,10 @@ let rec is_prefix_nonempt (xs' : 'a list) (ys' : 'a list) : bool =
 let uncurry f (a, b) = f a b
 let curry f a b = f (a, b)
 
+let all = List.fold_left (&&) true
+let samelen a b = List.length a = List.length b
+let zipwith f xs ys = List.map (uncurry f) (List.combine xs ys)
+
 let rec subtype (c : Tctxt.t) (t1 : Ast.ty) (t2 : Ast.ty) : bool =
   match (t1, t2) with
   | TInt, TInt
@@ -76,12 +80,13 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
           | Some x, Some y -> (x, y)
           | None, _ | _, None -> ([], [])
       in
+        (* XXX: maybe order doesnt matter. then change this to use lookup_field_option *)
         is_prefix_nonempt lk_s2_flist lk_s1_flist
     end
   | RFun (ts1, rt1), RFun (ts2, rt2)
     -> subtype_ret c rt1 rt2
-      && List.length ts1 = List.length ts2
-      && List.fold_left (&&) true @@ List.map (uncurry (subtype c)) (List.combine ts1 ts2)
+      && samelen ts1 ts2
+      && all @@ zipwith (subtype c) ts1 ts2
   | _ -> false
 
 and subtype_ret (c : Tctxt.t) (t1 : Ast.ret_ty) (t2 : Ast.ret_ty) : bool =
@@ -131,12 +136,12 @@ and typecheck_ret (l : 'a Ast.node) (tc : Tctxt.t) (t: Ast.ret_ty) : unit =
 (* typechecking expressions ------------------------------------------------- *)
 (* Typechecks an expression in the typing context c, returns the type of the
    expression.  This function should implement the inference rules given in the
-   oad.pdf specification.  There, they are written:
+   oat.pdf specification.  There, they are written:
 
        H; G; L |- exp : t
 
    See tctxt.ml for the implementation of the context c, which represents the
-   four typing contexts: H - for structure definitions G - for global
+   three typing contexts: H - for structure definitions G - for global
    identifiers L - for local identifiers
 
    Returns the (most precise) type for the expression, if it is type correct
@@ -154,7 +159,109 @@ and typecheck_ret (l : 'a Ast.node) (tc : Tctxt.t) (t: Ast.ret_ty) : unit =
 
 *)
 let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
-  failwith "todo: implement typecheck_exp"
+  match e.elt with
+  | CNull rty
+    -> typecheck_ty e c (TRef rty);
+      TNullRef rty
+  | CBool _ -> TBool
+  | CInt _ -> TInt
+  | CStr _ -> TRef RString
+  | Id i
+    -> begin match lookup_local_option i c with
+      | None
+        -> begin match lookup_global_option i c with
+          | None -> raise (type_error e "not well-typed: typ_local/typ_global")
+          | Some y -> y
+        end
+      | Some x -> x
+    end
+  | CArr (ty, es)
+    -> typecheck_ty e c ty;
+      let ts = List.map (typecheck_exp c) es in
+      if not @@ all @@ List.map (fun t -> subtype c t ty) ts
+      then raise (type_error e "not well-typed: typ_carr");
+      TRef (RArray ty)
+  (* XXX: unsure *)
+  | NewArr (ty, e1, i, e2)
+    -> typecheck_ty e c ty;
+    let crct = typecheck_exp c e1 = TInt
+      && lookup_local_option i c = None
+      && lookup_global_option i c = Some TInt (* about this one specifically *)
+      && subtype c (typecheck_exp c e2) ty
+    in if crct
+    then TRef (RArray ty)
+    else raise (type_error e "not well-typed: typ_newarray")
+  | Index (e1, e2)
+    -> let t = begin match typecheck_exp c e1 with
+        | TRef (RArray ty) -> ty
+        | _ -> raise (type_error e "not well-typed: typ_index")
+      end in
+      if typecheck_exp c e2 = TInt
+      then t
+      else raise (type_error e "not well-typed: typ_index")
+  | Length e'
+    -> begin match typecheck_exp c e' with
+        | TRef (RArray _) -> TInt
+        | _ -> raise (type_error e "not well-typed: typ_lenght")
+      end
+  | CStruct (i, ies)
+    -> let rec aux ascl_a =
+        match ascl_a with
+        | [] -> true
+        | (ai, ae)::axs
+          -> let t = begin match lookup_field_option i ai c with
+              | None -> raise (type_error e "not well-typed: typ_structex")
+              | Some x -> x
+            end in
+            let t' = typecheck_exp c ae in
+            if not (subtype c t t')
+            then false
+            else aux axs
+      in if not @@ (lookup_struct_option i c <> None)
+        && samelen ies (lookup_struct i c)
+        && aux ies
+      then raise (type_error e "not well-typed: typ_structex");
+      TRef (RStruct i)
+  | Proj (e', i)
+    -> let str = begin match typecheck_exp c e' with
+        | TRef (RStruct i) when List.mem i (List.map fst c.structs) -> i
+        | _ -> raise (type_error e "not well-typed: typ_field")
+      end
+      in let field_ty = match lookup_field_option str i c with
+        | None -> raise (type_error e "not well-typed: typ_field")
+        | Some x -> x
+      in field_ty
+  | Call (f, es)
+    -> let f_ty = match typecheck_exp c f with
+        | TRef (RFun (arg_tys, r_ty)) -> (arg_tys, r_ty)
+        | _ -> raise (type_error e "not well-typed: typ_call")
+      in let tys = List.map (typecheck_exp c) es in
+      if all @@ zipwith (subtype c) tys (fst f_ty)
+      (* XXX: so far all refty's wrapped in TRef. but here things get weird. what if we have RetVoid ? if we would return a sum type, could write snd f_ty here... *)
+      then
+        begin match snd f_ty with
+          | RetVoid -> failwith "type of void ???"
+          | RetVal ty -> ty
+        end
+      else raise (type_error e "not well-typed: typ_call")
+  | Bop (bop, e1, e2)
+    -> let t1 = typecheck_exp c e1 in
+      let t2 = typecheck_exp c e2 in
+      if bop = Eq || bop = Neq
+      then
+        if subtype c t1 t2 && subtype c t2 t1
+        then TBool
+        else raise (type_error e "not well-typed: typ_eq")
+      else
+        let (tbop1, tbop2, tbop3) = typ_of_binop bop in
+        if tbop1 = t1 && tbop2 = t2
+        then tbop3
+        else raise (type_error e "not well-typed: typ_bop")
+  | Uop (uop, e')
+    -> let tuop = fst @@ typ_of_unop uop in
+      if typecheck_exp c e' = tuop
+      then tuop
+      else raise (type_error e "not well-typed: typ_uop")
 
 (* statements --------------------------------------------------------------- *)
 
