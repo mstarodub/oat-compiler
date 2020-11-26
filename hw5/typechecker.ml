@@ -25,6 +25,8 @@ let builtins =
   ; "print_bool",       ([TBool], RetVoid)
   ]
 
+let builtins' = List.map (fun (x, (ts, rt)) -> x, TRef (RFun (ts, rt))) builtins
+
 (* binary operation types --------------------------------------------------- *)
 let typ_of_binop : Ast.binop -> Ast.ty * Ast.ty * Ast.ty = function
   | Add | Mul | Sub | Shl | Shr | Sar | IAnd | IOr -> (TInt, TInt, TInt)
@@ -331,37 +333,94 @@ let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
 (* The following functions correspond to the
    judgments that create the global typechecking context.
 
-   create_struct_ctxt: - adds all the struct types to the struct 'S'
-   context (checking to see that there are no duplicate fields
+   create_struct_ctxt: - adds all the struct types to the struct 'H'
+   context (checking to see that there are no duplicate fields)
 
-     H |-s prog ==> H'
+     H_1 |-s prog ==> H_2
 
 
    create_function_ctxt: - adds the the function identifiers and their
-   types to the 'F' context (ensuring that there are no redeclared
+   types to the 'G' context (ensuring that there are no redeclared
    function identifiers)
 
-     H ; G1 |-f prog ==> G2
+     H ; G_1 |-f prog ==> G_2
 
 
    create_global_ctxt: - typechecks the global initializers and adds
    their identifiers to the 'G' global context
 
-     H ; G1 |-g prog ==> G2
+     H ; G_1 |-g prog ==> G_2
 
 
    NOTE: global initializers may mention function identifiers as
    constants, but can't mention other global values *)
 
+let rec has_duplicate (l : 'a list) : bool =
+  match l with
+  | [] -> false
+  | x::xs -> (List.mem x xs) || has_duplicate xs
+
+let rec filter_prog_tdecl (p:Ast.prog) : Ast.tdecl node list =
+  match p with
+  | [] -> []
+  | d::ds
+    -> begin match d with
+      | Gtdecl x
+        -> if has_duplicate (snd x.elt)
+          then raise (type_error x "not well-typed: duplicate struct field")
+          else [x]
+      | _ -> []
+    end @ filter_prog_tdecl ds
+
+(* XXX: typ_sgdecl, typ_sfdecl ? *)
 let create_struct_ctxt (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_struct_ctxt"
+  let addstructs ctxt (newst : Ast.tdecl node) : Tctxt.t =
+    let id = fst newst.elt in
+    let fs = snd newst.elt in
+    match lookup_struct_option id ctxt with
+      | None -> add_struct ctxt id fs
+      | Some _ -> raise (type_error newst "not well-typed: duplicate struct def.")
+  in List.fold_left addstructs Tctxt.empty (filter_prog_tdecl p)
+
+let rec filter_prog_fdecl (p:Ast.prog) : Ast.fdecl node list =
+  match p with
+  | [] -> []
+  | d::ds
+    -> begin match d with
+      | Gfdecl f -> [f]
+      | _ -> []
+    end @ filter_prog_fdecl ds
 
 let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_function_ctxt"
+  let addfuncs ctxt (newfun : Ast.fdecl node) : Tctxt.t =
+    let id = newfun.elt.fname in
+    let ty = TRef (RFun (List.map fst newfun.elt.args, newfun.elt.frtyp)) in
+    match lookup_global_option id ctxt with
+      | None -> add_global ctxt id ty
+      | Some _ -> raise (type_error newfun "not well-typed: function already def.")
+  in List.fold_left
+    addfuncs
+    (List.fold_left (fun c -> uncurry (add_global c)) tc builtins')
+    (filter_prog_fdecl p)
+
+let rec filter_prog_gdecl (p:Ast.prog) : Ast.gdecl node list =
+  match p with
+  | [] -> []
+  | d::ds
+    -> begin match d with
+      | Gvdecl g -> [g]
+      | _ -> []
+    end @ filter_prog_gdecl ds
 
 let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_function_ctxt"
-
+  let addglobals ctxt (newglob : Ast.gdecl node) : Tctxt.t =
+    let id = newglob.elt.name in
+    let ex = newglob.elt.init in
+    match lookup_global_option id ctxt with
+      (* tc in inner typecheck, because we cannot reference other globals *)
+      | None -> add_global ctxt id (typecheck_exp tc ex)
+      | Some _ -> raise (type_error newglob "not well-typed: global already def.")
+  in List.fold_left addglobals tc (filter_prog_gdecl p)
 
 (* This function implements the |- prog and the H ; G |- prog
    rules of the oat.pdf specification.
