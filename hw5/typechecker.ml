@@ -25,7 +25,22 @@ let builtins =
   ; "print_bool",       ([TBool], RetVoid)
   ]
 
+(* same but wrapped in ty's *)
 let builtins' = List.map (fun (x, (ts, rt)) -> x, TRef (RFun (ts, rt))) builtins
+
+(* helpers *)
+let rec is_prefix (xs' : 'a list) (ys' : 'a list) : bool =
+  match xs', ys' with
+  | [], _ -> true
+  | _::_, [] -> false
+  | x::xs, y::ys -> if x <> y then false else is_prefix xs ys
+
+let uncurry f (a, b) = f a b
+let curry f a b = f (a, b)
+
+let all = List.fold_left (&&) true
+let samelen a b = List.length a = List.length b
+let zipwith f xs ys = List.map (uncurry f) (List.combine xs ys)
 
 (* binary operation types --------------------------------------------------- *)
 let typ_of_binop : Ast.binop -> Ast.ty * Ast.ty * Ast.ty = function
@@ -48,19 +63,6 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
       relation. We have included a template for subtype_ref to get you started.
       (Don't forget about OCaml's 'and' keyword.)
 *)
-let rec is_prefix_nonempt (xs' : 'a list) (ys' : 'a list) : bool =
-  match xs', ys' with
-  | [], _::_ -> true
-  | _::_, [] | [], [] -> false
-  | x::xs, y::ys -> if x <> y then false else is_prefix_nonempt xs ys
-
-let uncurry f (a, b) = f a b
-let curry f a b = f (a, b)
-
-let all = List.fold_left (&&) true
-let samelen a b = List.length a = List.length b
-let zipwith f xs ys = List.map (uncurry f) (List.combine xs ys)
-
 let rec subtype (c : Tctxt.t) (t1 : Ast.ty) (t2 : Ast.ty) : bool =
   match (t1, t2) with
   | TInt, TInt
@@ -76,19 +78,14 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
   | RString, RString -> true
   | RArray t1, RArray t2 -> t1 = t2
   | RStruct s1, RStruct s2
-    -> begin
-      let lk_s1_flist, lk_s2_flist =
-        match lookup_struct_option s1 c, lookup_struct_option s2 c with
-          | Some x, Some y -> (x, y)
-          | None, _ | _, None -> ([], [])
-      in
-        (* XXX: maybe order doesnt matter. then change this to use lookup_field_option *)
-        is_prefix_nonempt lk_s2_flist lk_s1_flist
-    end
+    -> begin match lookup_struct_option s1 c, lookup_struct_option s2 c with
+          | Some x, Some y -> is_prefix y x
+          | None, _ | _, None -> false
+      end
   | RFun (ts1, rt1), RFun (ts2, rt2)
     -> subtype_ret c rt1 rt2
       && samelen ts1 ts2
-      && all @@ zipwith (subtype c) ts1 ts2
+      && all @@ zipwith (subtype c) ts2 ts1
   | _ -> false
 
 and subtype_ret (c : Tctxt.t) (t1 : Ast.ret_ty) (t2 : Ast.ret_ty) : bool =
@@ -125,7 +122,7 @@ and typecheck_ref (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.rty) : unit =
   | RStruct s
     -> if lookup_struct_option s tc <> None
       then ()
-      else raise (type_error l "not a wellformed type")
+      else type_error l "unknown struct"
   | RFun (ts, ret)
     -> typecheck_ret l tc ret;
       List.iter (typecheck_ty l tc) ts
@@ -163,107 +160,96 @@ and typecheck_ret (l : 'a Ast.node) (tc : Tctxt.t) (t: Ast.ret_ty) : unit =
 let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
   match e.elt with
   | CNull rty
-    -> typecheck_ty e c (TRef rty);
+    -> typecheck_ref e c rty;
       TNullRef rty
   | CBool _ -> TBool
   | CInt _ -> TInt
   | CStr _ -> TRef RString
   | Id i
-    -> begin match lookup_local_option i c with
-      | None
-        -> begin match lookup_global_option i c with
-          | None -> raise (type_error e "not well-typed: typ_local/typ_global")
-          | Some y -> y
-        end
-      | Some x -> x
-    end
+    -> begin match lookup_option i c with
+        | None -> type_error e ("unknown variable " ^ i)
+        | Some x -> x
+      end
   | CArr (ty, es)
     -> typecheck_ty e c ty;
       let ts = List.map (typecheck_exp c) es in
       if not @@ all @@ List.map (fun t -> subtype c t ty) ts
-      then raise (type_error e "not well-typed: typ_carr");
+      then type_error e "incorrect member type";
       TRef (RArray ty)
-  (* XXX: unsure *)
   | NewArr (ty, e1, i, e2)
     -> typecheck_ty e c ty;
     let crct = typecheck_exp c e1 = TInt
       && lookup_local_option i c = None
-      && lookup_global_option i c = Some TInt (* about this one specifically *)
-      && subtype c (typecheck_exp c e2) ty
+      && subtype c (typecheck_exp (add_local c i TInt) e2) ty
     in if crct
     then TRef (RArray ty)
-    else raise (type_error e "not well-typed: typ_newarray")
+    else type_error e "illegal redefinition or wrong array type"
   | Index (e1, e2)
-    -> let t = begin match typecheck_exp c e1 with
-        | TRef (RArray ty) -> ty
-        | _ -> raise (type_error e "not well-typed: typ_index")
-      end in
-      if typecheck_exp c e2 = TInt
-      then t
-      else raise (type_error e "not well-typed: typ_index")
+    -> begin match typecheck_exp c e1, typecheck_exp c e2 with
+        | TRef (RArray ty), TInt -> ty
+        | _ -> type_error e "cannot index into type"
+      end
   | Length e'
     -> begin match typecheck_exp c e' with
         | TRef (RArray _) -> TInt
-        | _ -> raise (type_error e "not well-typed: typ_lenght")
+        | _ -> type_error e "cannot take length of non-array type"
       end
   | CStruct (i, ies)
-    -> let rec aux ascl_a =
+    -> let rec aux ascl_a : unit =
         match ascl_a with
-        | [] -> true
+        | [] -> ()
         | (ai, ae)::axs
           -> let t = begin match lookup_field_option i ai c with
-              | None -> raise (type_error e "not well-typed: typ_structex")
+              | None -> type_error e ("struct has no such field " ^ i)
               | Some x -> x
             end in
             let t' = typecheck_exp c ae in
             if not (subtype c t t')
-            then false
+            then type_error e "type mismatch for struct initialisation"
             else aux axs
-      in if not @@ (lookup_struct_option i c <> None)
-        && samelen ies (lookup_struct i c)
-        && aux ies
-      then raise (type_error e "not well-typed: typ_structex");
-      TRef (RStruct i)
+      in
+        if lookup_struct_option i c = None
+        then type_error e "undeclared struct"
+        else if not @@ samelen ies (lookup_struct i c)
+        then type_error e "argument mismatch, cannot initialise struct"
+        else aux ies;
+        TRef (RStruct i)
   | Proj (e', i)
-    -> let str = begin match typecheck_exp c e' with
-        | TRef (RStruct i) when List.mem i (List.map fst c.structs) -> i
-        | _ -> raise (type_error e "not well-typed: typ_field")
+    -> let struct_exists tc s = List.mem s (List.map fst tc.structs) in
+      let str = begin match typecheck_exp c e' with
+        | TRef (RStruct x) when struct_exists c x -> x
+        | _ -> type_error e "cannot take field of non-struct"
       end
-      in let field_ty = match lookup_field_option str i c with
-        | None -> raise (type_error e "not well-typed: typ_field")
+      in begin match lookup_field_option str i c with
+        | None -> type_error e ("struct has no such field " ^ i)
         | Some x -> x
-      in field_ty
+      end
   | Call (f, es)
-    -> let f_ty = match typecheck_exp c f with
-        | TRef (RFun (arg_tys, r_ty)) -> (arg_tys, r_ty)
-        | _ -> raise (type_error e "not well-typed: typ_call")
-      in let tys = List.map (typecheck_exp c) es in
-      if all @@ zipwith (subtype c) tys (fst f_ty)
-      (* XXX: so far all refty's wrapped in TRef. but here things get weird. what if we have RetVoid ? if we would return a sum type, could write snd f_ty here... *)
-      then
-        begin match snd f_ty with
-          | RetVoid -> failwith "type of void ???"
-          | RetVal ty -> ty
-        end
-      else raise (type_error e "not well-typed: typ_call")
+    -> let arg_tys, r_ty = begin match typecheck_exp c f with
+        | TRef (RFun (x, RetVal y)) -> (x, y)
+        | _ -> type_error e "cannot call non-function"
+      end in let ts = List.map (typecheck_exp c) es in
+      if not @@ samelen ts arg_tys
+      then type_error e "wrong number of args"
+      else if not @@ all @@ zipwith (subtype c) ts arg_tys
+      then type_error e "incompatible argument types"
+      else r_ty
+  | Bop (Eq, e1, e2) | Bop (Neq, e1, e2)
+    -> let t1, t2 = typecheck_exp c e1, typecheck_exp c e2 in
+      if subtype c t1 t2 && subtype c t2 t1
+      then TBool
+      else type_error e "incompatible types, cannot compare"
   | Bop (bop, e1, e2)
-    -> let t1 = typecheck_exp c e1 in
-      let t2 = typecheck_exp c e2 in
-      if bop = Eq || bop = Neq
-      then
-        if subtype c t1 t2 && subtype c t2 t1
-        then TBool
-        else raise (type_error e "not well-typed: typ_eq")
-      else
-        let (tbop1, tbop2, tbop3) = typ_of_binop bop in
-        if tbop1 = t1 && tbop2 = t2
-        then tbop3
-        else raise (type_error e "not well-typed: typ_bop")
+    -> let t1, t2 = typecheck_exp c e1, typecheck_exp c e2 in
+      let tbop1, tbop2, tbop3 = typ_of_binop bop in
+      if tbop1 = t1 && tbop2 = t2
+      then tbop3
+      else type_error e "incompatible types, cannot perform bop"
   | Uop (uop, e')
-    -> let tuop = fst @@ typ_of_unop uop in
-      if typecheck_exp c e' = tuop
-      then tuop
-      else raise (type_error e "not well-typed: typ_uop")
+    -> let tuop1, tuop2 = typ_of_unop uop in
+      if typecheck_exp c e' = tuop1
+      then tuop2
+      else type_error e "incompatible types, cannot perform uop"
 
 (* statements --------------------------------------------------------------- *)
 
@@ -305,7 +291,7 @@ let rec typecheck_block (tc : Tctxt.t) (r : ret_ty) (b : Ast.block) : Tctxt.t * 
   | s::ss
     -> let newtc, ret = typecheck_stmt tc s r in
       if ret
-      then raise (type_error s "not well-typed: early return")
+      then type_error s "return not at end of block"
       else typecheck_block newtc r ss
 
 and typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * bool =
@@ -313,67 +299,67 @@ and typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * 
   | Assn (e1, e2)
     -> let t1, t2 = typecheck_exp tc e1, typecheck_exp tc e2 in
       if begin match e1.elt with
-          | Id i when
-            let lk = lookup_global_option i tc in
-            lk = None || begin match lk with
-                | Some TRef (RFun _) -> false
-                | _ -> true
+          | Id i
+            -> begin match lookup_local_option i tc with
+                | Some _ -> true
+                | None -> begin match lookup_global_option i tc with
+                    | Some TRef (RFun _) -> false
+                    | _ -> true
+                  end
               end
-            -> true
-          | Id _ -> false (* TRef (RFun _) - case *)
           | _ -> true
         end
         && subtype tc t2 t1
       then tc, false
-      else raise (type_error s "not well-typed: typ_assn")
+      else type_error s "illegal redefinition or incompatible type, cannot assign"
   | Decl vd
     -> let id = fst vd in
       let ty_e = typecheck_exp tc (snd vd) in
       if lookup_local_option id tc <> None
-      then raise (type_error s "not well-typed: typ_stmtdecl")
+      then type_error s "illegal redeclaration"
       else add_local tc id ty_e, false
   | Ret eo
     -> begin match to_ret, eo with
         | RetVoid, None -> tc, true
         | RetVal t, Some rt when subtype tc (typecheck_exp tc rt) t -> tc, true
-        | _ -> raise (type_error s "not well-typed: return type")
+        | _ -> type_error s "incompatible return type"
       end
   | SCall (e, es)
     -> let ts' = List.map (typecheck_exp tc) es in
       let ts = begin match typecheck_exp tc e with
         | TRef (RFun (x, RetVoid)) -> x
-        | _ -> raise (type_error s "not well-typed: typ_scall")
+        | _ -> type_error s "incompatible function type"
       end in if all @@ zipwith (subtype tc) ts' ts
       then tc, false
-      else raise (type_error s "not well-typed: typ_scall")
+      else type_error s "incompatible argument types"
   | If (e, ss1, ss2)
     -> let rets = (snd @@ typecheck_block tc to_ret ss1)
           && (snd @@ typecheck_block tc to_ret ss2) in
       if typecheck_exp tc e = TBool
       then tc, rets
-      else raise (type_error s "not well-typed: typ_if")
+      else type_error s "incompatible condition type, expected bool"
   | Cast (rt, id, e, ss1, ss2)
     -> let e_ty = begin match typecheck_exp tc e with
         | TNullRef x -> x
-        | _ -> raise (type_error s "not well-typed: not a nullable reftype")
+        | _ -> type_error s "incompatible type, not a nullable reftype"
       end in let rets = (snd @@ typecheck_block (add_local tc id (TRef rt)) to_ret ss1)
           && (snd @@ typecheck_block tc to_ret ss2) in
       if subtype_ref tc e_ty rt
       then tc, rets
-      else raise (type_error s "not well-typed: typ_ifq")
+      else type_error s "incompatible reftype"
   | For (vds, eo, so, ss)
     -> let f = fun c (i, e) -> begin match lookup_local_option i tc with
-        | Some _ -> raise (type_error s "not well-typed: for: redefinition of var")
+        | Some _ -> type_error s "redefinition of variable inside for prelude"
         | None -> add_local c i (typecheck_exp c e)
-      end in
-      let tc' = List.fold_left f tc vds in
+        end
+      in let tc' = List.fold_left f tc vds in
       begin if eo <> None then let Some e = eo in
         if typecheck_exp tc' e <> TBool
-        then raise (type_error s "not well-typed: condition is not a bool")
+        then type_error s "incompatible condition type, expected bool"
       end;
       begin if so <> None then let Some s = so in
         if snd @@ typecheck_stmt tc' s to_ret
-        then raise (type_error s "not well-typed: return in init of for-loop")
+        then type_error s "early return in inside for prelude"
       end;
       typecheck_block tc' to_ret ss;
       tc, false
@@ -381,7 +367,7 @@ and typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * 
     -> typecheck_block tc to_ret ss;
       if typecheck_exp tc e = TBool
       then tc, false
-      else raise (type_error s "not well-typed: while")
+      else type_error s "incompatible condition type, expected bool"
 
 (* struct type declarations ------------------------------------------------- *)
 (* Here is an example of how to implement the TYP_TDECLOK rule, which is
