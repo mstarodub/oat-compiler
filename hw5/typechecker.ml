@@ -298,9 +298,90 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
    - You will probably find it convenient to add a helper function that implements the
      block typecheck rules.
 *)
-let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * bool =
-  failwith "todo: implement typecheck_stmt"
+let rec typecheck_block (tc : Tctxt.t) (r : ret_ty) (b : Ast.block) : Tctxt.t * bool =
+  match b with
+  | [] -> tc, false
+  | [s] -> typecheck_stmt tc s r
+  | s::ss
+    -> let newtc, ret = typecheck_stmt tc s r in
+      if ret
+      then raise (type_error s "not well-typed: early return")
+      else typecheck_block newtc r ss
 
+and typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * bool =
+  match s.elt with
+  | Assn (e1, e2)
+    -> let t1, t2 = typecheck_exp tc e1, typecheck_exp tc e2 in
+      if begin match e1.elt with
+          | Id i when
+            let lk = lookup_global_option i tc in
+            lk = None || begin match lk with
+                | Some TRef (RFun _) -> false
+                | _ -> true
+              end
+            -> true
+          | Id _ -> false (* TRef (RFun _) - case *)
+          | _ -> true
+        end
+        && subtype tc t2 t1
+      then tc, false
+      else raise (type_error s "not well-typed: typ_assn")
+  | Decl vd
+    -> let id = fst vd in
+      let ty_e = typecheck_exp tc (snd vd) in
+      if lookup_local_option id tc <> None
+      then raise (type_error s "not well-typed: typ_stmtdecl")
+      else add_local tc id ty_e, false
+  | Ret eo
+    -> begin match to_ret, eo with
+        | RetVoid, None -> tc, true
+        | RetVal t, Some rt when subtype tc (typecheck_exp tc rt) t -> tc, true
+        | _ -> raise (type_error s "not well-typed: return type")
+      end
+  | SCall (e, es)
+    -> let ts' = List.map (typecheck_exp tc) es in
+      let ts = begin match typecheck_exp tc e with
+        | TRef (RFun (x, RetVoid)) -> x
+        | _ -> raise (type_error s "not well-typed: typ_scall")
+      end in if all @@ zipwith (subtype tc) ts' ts
+      then tc, false
+      else raise (type_error s "not well-typed: typ_scall")
+  | If (e, ss1, ss2)
+    -> let rets = (snd @@ typecheck_block tc to_ret ss1)
+          && (snd @@ typecheck_block tc to_ret ss2) in
+      if typecheck_exp tc e = TBool
+      then tc, rets
+      else raise (type_error s "not well-typed: typ_if")
+  | Cast (rt, id, e, ss1, ss2)
+    -> let e_ty = begin match typecheck_exp tc e with
+        | TNullRef x -> x
+        | _ -> raise (type_error s "not well-typed: not a nullable reftype")
+      end in let rets = (snd @@ typecheck_block (add_local tc id (TRef rt)) to_ret ss1)
+          && (snd @@ typecheck_block tc to_ret ss2) in
+      if subtype_ref tc e_ty rt
+      then tc, rets
+      else raise (type_error s "not well-typed: typ_ifq")
+  | For (vds, eo, so, ss)
+    -> let f = fun c (i, e) -> begin match lookup_local_option i tc with
+        | Some _ -> raise (type_error s "not well-typed: for: redefinition of var")
+        | None -> add_local c i (typecheck_exp c e)
+      end in
+      let tc' = List.fold_left f tc vds in
+      begin if eo <> None then let Some e = eo in
+        if typecheck_exp tc' e <> TBool
+        then raise (type_error s "not well-typed: condition is not a bool")
+      end;
+      begin if so <> None then let Some s = so in
+        if snd @@ typecheck_stmt tc' s to_ret
+        then raise (type_error s "not well-typed: return in init of for-loop")
+      end;
+      typecheck_block tc' to_ret ss;
+      tc, false
+  | While (e, ss)
+    -> typecheck_block tc to_ret ss;
+      if typecheck_exp tc e = TBool
+      then tc, false
+      else raise (type_error s "not well-typed: while")
 
 (* struct type declarations ------------------------------------------------- *)
 (* Here is an example of how to implement the TYP_TDECLOK rule, which is
@@ -326,7 +407,13 @@ let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
     - checks that the function actually returns
 *)
 let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
-  failwith "todo: typecheck_fdecl"
+  let ctxt = List.fold_left
+    (fun c -> uncurry (add_global c))
+    tc
+    (List.map (fun (x,y) -> (y,x)) f.args) in
+  if not @@ snd @@ typecheck_block ctxt f.frtyp f.body
+  then raise (type_error l "not well-typed: does not return")
+
 
 (* creating the typchecking context ----------------------------------------- *)
 
