@@ -108,13 +108,11 @@ module TypeCtxt = struct
     | Some x -> x
 
   (* Return a pair of base type and index into struct *)
-  let rec lookup_field_name f (c : t) =
-    match c with
-    | [] -> failwith "lookup_field_name: Not found"
-    | (id, field) :: t ->
-        match index_of f field 0 with
-        | None -> lookup_field_name f t
-        | Some x -> List.(nth field x).ftyp, Int64.of_int x
+  let rec lookup_field_name (st:Ast.id) (f:Ast.id) (c : t) : (Ast.ty * Int64.t) =
+    let fields = lookup st c in
+    match index_of f fields 0 with
+    | None -> failwith "lookup_field_name: no such field"
+    | Some x -> List.(nth fields x).ftyp, Int64.of_int x
 end
 
 (* compiling OAT types ------------------------------------------------------ *)
@@ -343,7 +341,7 @@ and cmp_exp_lhs (tc : TypeCtxt.t) (c:Ctxt.t) (e:exp node) : Ll.ty * Ll.operand *
      the actual load from the address to project the value is handled by the
      Ast.proj case of the cmp_exp function (above).
 
-     You will find the TypeCtxt.lookup_field_name function helpfule.
+     You will find the TypeCtxt.lookup_field_name function helpful.
   *)
   | Ast.Proj (e, i) ->
     failwith "todo: Ast.Proj case of cmp_exp_lhs"

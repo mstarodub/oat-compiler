@@ -1,0 +1,2 @@
+global x = new int[] {0, 1, 2};
+int program(int argc, string[] argv){ return 0; }

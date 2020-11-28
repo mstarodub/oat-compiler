@@ -1,0 +1,6 @@
+int id(int x) { return x; }
+int program (int argc, string[] argv) {
+var id = 0;
+id = 1000;
+return 0;
+}

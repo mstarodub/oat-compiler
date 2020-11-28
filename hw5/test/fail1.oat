@@ -1,0 +1,5 @@
+int id(int x) { return x; }
+int program (int argc, string[] argv) {
+id = 0;
+return 0;
+}

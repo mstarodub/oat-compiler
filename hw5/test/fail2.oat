@@ -1,0 +1,8 @@
+struct Node {
+    Node next
+}
+
+int program (int argc, string[] argv) {
+    var testNode = new Node {next = Node null};
+    return 42;
+}

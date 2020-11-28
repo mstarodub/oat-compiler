@@ -300,12 +300,12 @@ and typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * 
     -> let t1, t2 = typecheck_exp tc e1, typecheck_exp tc e2 in
       if begin match e1.elt with
           | Id i
-            -> begin match lookup_local_option i tc with
-                | Some _ -> true
-                | None -> begin match lookup_global_option i tc with
-                    | Some TRef (RFun _) -> false
-                    | _ -> true
+            -> begin match lookup_global_option i tc with
+                | Some TRef (RFun _) -> begin match lookup_local_option i tc with
+                    | Some _ -> true
+                    | None -> false
                   end
+                | _ -> true
               end
           | _ -> true
         end
@@ -382,7 +382,7 @@ let rec check_dups fs =
 
 let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
   if check_dups fs
-  then type_error l ("Repeated fields in " ^ id)
+  then type_error l ("repeated fields in " ^ id)
   else List.iter (fun f -> typecheck_ty l tc f.ftyp) fs
 
 (* function declarations ---------------------------------------------------- *)
@@ -398,7 +398,7 @@ let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
     tc
     (List.map (fun (x,y) -> (y,x)) f.args) in
   if not @@ snd @@ typecheck_block ctxt f.frtyp f.body
-  then raise (type_error l "not well-typed: does not return")
+  then type_error l (f.fname ^ " does not return, expected return")
 
 
 (* creating the typchecking context ----------------------------------------- *)
@@ -433,66 +433,62 @@ let rec has_duplicate (l : 'a list) : bool =
   | [] -> false
   | x::xs -> (List.mem x xs) || has_duplicate xs
 
-let rec filter_prog_tdecl (p:Ast.prog) : Ast.tdecl node list =
-  match p with
-  | [] -> []
-  | d::ds
-    -> begin match d with
-      | Gtdecl x
-        -> if has_duplicate (snd x.elt)
-          then raise (type_error x "not well-typed: duplicate struct field")
-          else [x]
-      | _ -> []
-    end @ filter_prog_tdecl ds
-
-(* XXX: typ_sgdecl, typ_sfdecl ? *)
 let create_struct_ctxt (p:Ast.prog) : Tctxt.t =
-  let addstructs ctxt (newst : Ast.tdecl node) : Tctxt.t =
+  let rec filter_prog_tdecl (p:Ast.prog) : Ast.tdecl node list =
+    match p with
+    | [] -> []
+    | d::ds
+      -> begin match d with
+        | Gtdecl x
+          -> if has_duplicate (snd x.elt)
+            then type_error x "illegal duplicate struct field"
+            else [x]
+        | _ -> []
+      end @ filter_prog_tdecl ds
+  in let addstructs ctxt (newst : Ast.tdecl node) : Tctxt.t =
     let id = fst newst.elt in
     let fs = snd newst.elt in
     match lookup_struct_option id ctxt with
       | None -> add_struct ctxt id fs
-      | Some _ -> raise (type_error newst "not well-typed: duplicate struct def.")
+      | Some _ -> type_error newst "illegal redefinition of struct"
   in List.fold_left addstructs Tctxt.empty (filter_prog_tdecl p)
 
-let rec filter_prog_fdecl (p:Ast.prog) : Ast.fdecl node list =
-  match p with
-  | [] -> []
-  | d::ds
-    -> begin match d with
-      | Gfdecl f -> [f]
-      | _ -> []
-    end @ filter_prog_fdecl ds
-
 let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
-  let addfuncs ctxt (newfun : Ast.fdecl node) : Tctxt.t =
+  let rec filter_prog_fdecl (p:Ast.prog) : Ast.fdecl node list =
+    match p with
+    | [] -> []
+    | d::ds
+      -> begin match d with
+        | Gfdecl f -> [f]
+        | _ -> []
+      end @ filter_prog_fdecl ds
+  in let addfuncs ctxt (newfun : Ast.fdecl node) : Tctxt.t =
     let id = newfun.elt.fname in
     let ty = TRef (RFun (List.map fst newfun.elt.args, newfun.elt.frtyp)) in
     match lookup_global_option id ctxt with
       | None -> add_global ctxt id ty
-      | Some _ -> raise (type_error newfun "not well-typed: function already def.")
+      | Some _ -> type_error newfun "illegal redefinition of function"
   in List.fold_left
     addfuncs
     (List.fold_left (fun c -> uncurry (add_global c)) tc builtins')
     (filter_prog_fdecl p)
 
-let rec filter_prog_gdecl (p:Ast.prog) : Ast.gdecl node list =
-  match p with
-  | [] -> []
-  | d::ds
-    -> begin match d with
-      | Gvdecl g -> [g]
-      | _ -> []
-    end @ filter_prog_gdecl ds
-
 let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
-  let addglobals ctxt (newglob : Ast.gdecl node) : Tctxt.t =
+  let rec filter_prog_gdecl (p:Ast.prog) : Ast.gdecl node list =
+    match p with
+    | [] -> []
+    | d::ds
+      -> begin match d with
+        | Gvdecl g -> [g]
+        | _ -> []
+      end @ filter_prog_gdecl ds
+  in let addglobals ctxt (newglob : Ast.gdecl node) : Tctxt.t =
     let id = newglob.elt.name in
     let ex = newglob.elt.init in
     match lookup_global_option id ctxt with
       (* tc in inner typecheck, because we cannot reference other globals *)
       | None -> add_global ctxt id (typecheck_exp tc ex)
-      | Some _ -> raise (type_error newglob "not well-typed: global already def.")
+      | Some _ -> type_error newglob "illegal redefinition of global"
   in List.fold_left addglobals tc (filter_prog_gdecl p)
 
 (* This function implements the |- prog and the H ; G |- prog

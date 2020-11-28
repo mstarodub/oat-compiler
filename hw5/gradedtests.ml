@@ -490,7 +490,7 @@ let hw4_tests =
 let functionality_tests : suite = [GradedTest("functionality tests from HW04", 10, executed_oat_file hw4_tests)]
 
 let graded_tests : suite =
-  typecheck_tests @
-  hw5_tests @
-  functionality_tests @
-  manual_tests
+  typecheck_tests
+  @ hw5_tests
+  @ functionality_tests
+  (* @ manual_tests *)
