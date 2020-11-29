@@ -207,7 +207,7 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
               | Some x -> x
             end in
             let t' = typecheck_exp c ae in
-            if not (subtype c t t')
+            if not (subtype c t' t)
             then type_error e ("incompatible type for field initialiser, expected " ^ (Astlib.ml_string_of_ty t))
             else aux axs
       in
