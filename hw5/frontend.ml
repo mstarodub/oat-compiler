@@ -73,6 +73,9 @@ module Ctxt = struct
   let lookup (id:Ast.id) (c:t) : Ll.ty * Ll.operand =
     List.assoc id c
 
+  let lookup_option (id:Ast.id) (c:t) =
+    try Some (List.assoc id c) with Not_found -> None
+
 end
 
 (* Mapping of identifiers representing struct definitions to
@@ -266,7 +269,10 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
     cmp_ty tc ret_ty, Id ans_id, code >:: I (ans_id, cmp_uop op uop)
 
   | Ast.Id id ->
-    let t, op = Ctxt.lookup id c in
+    let t, op = begin match Ctxt.lookup_option id c with
+      | Some (x, y) -> x, y
+      | None -> failwith ("tried lookup on " ^ id ^ ", failed")
+    end in
     begin match t with
       | Ptr (Fun _) -> t, op, []
       | Ptr t ->
@@ -280,7 +286,14 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
        of the array struct representation.
   *)
   | Ast.Length e ->
-    failwith "todo:implement Ast.Length case"
+    let ty, op, code = cmp_exp tc c e in
+    let e_ty = begin match ty with
+      | Ptr (Struct [_; Array (_, t)]) -> t
+      | _ -> failwith "broken invariant: length: not an array" end in
+    let ans_id, temp = gensym "length", gensym "tmp" in
+    I64, Id ans_id, code >@ lift
+      [ temp, Gep(ty, op, [i64_op_of_int 0; i64_op_of_int 0])
+      ; ans_id, Load(Ptr I64, Id temp) ]
 
   | Ast.Index (e, i) ->
     let ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
@@ -317,7 +330,59 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
   | Ast.NewArr (elt_ty, e1, id, e2) ->
     let _, size_op, size_code = cmp_exp tc c e1 in
     let arr_ty, arr_op, alloc_code = oat_alloc_array tc elt_ty size_op in
-    arr_ty, arr_op, size_code >@ alloc_code
+    begin match size_op with
+      | Null -> failwith "broken invariant: size operand is null"
+      | Const size ->
+        print_endline "hello I am in the const branch";
+        (* unroll loop, size is known at compile time *)
+        let {elt=e2e;loc=e2l} = e2 in
+        let rec construct_r (n : int) (f : int -> 'a) : 'a list =
+          if n < 0 then failwith "broken invariant: negative array length"
+          else if n = 0 then [] else (f (n-1))::(construct_r (n-1) f)
+        in
+        let rec replace_id (n:int) (t:Ast.exp) : Ast.exp =
+          match t with
+          | Id i when i = id
+            -> CInt (Int64.of_int n)
+          | CArr (t, enl)
+            -> CArr (t, List.map (fun {elt=a;loc=b} -> {elt=replace_id n a;loc=b}) enl)
+          | NewArr (t, {elt=e1;loc=l1}, i, {elt=e2;loc=l2})
+            -> NewArr (t, {elt=replace_id n e1;loc=l1}, i, {elt=replace_id n e2;loc=l2})
+          | Index ({elt=e1;loc=l1}, {elt=e2;loc=l2})
+            -> Index ({elt=replace_id n e1;loc=l1}, {elt=replace_id n e2;loc=l2})
+          | Length {elt=e;loc=l}
+            -> Length {elt=replace_id n e;loc=l}
+          | CStruct (i, ienl)
+            -> CStruct (i, List.map (fun (x, {elt=a;loc=b}) -> x, {elt=replace_id n a;loc=b}) ienl)
+          | Proj ({elt=e;loc=l}, i)
+            -> Proj ({elt=replace_id n e;loc=l}, i)
+          | Call ({elt=e;loc=l}, enl)
+            -> Call ({elt=replace_id n e;loc=l}, List.map (fun {elt=a;loc=b} -> {elt=replace_id n a;loc=b}) enl)
+          | Bop (b, {elt=e1;loc=l1}, {elt=e2;loc=l2})
+            -> Bop (b, {elt=replace_id n e1;loc=l1}, {elt=replace_id n e2;loc=l2})
+          | Uop (u, {elt=e;loc=l})
+            -> Uop (u, {elt=replace_id n e;loc=l})
+          | e -> e
+        in
+        cmp_exp tc c @@ {elt=Ast.CArr (elt_ty, List.rev @@ construct_r (Int64.to_int size) (fun i -> {elt=replace_id i e2e;loc=e2l})); loc=exp.loc}
+      | Gid s | Id s ->
+        (* this is broken as fuck ..*)
+        print_endline "hello I am in the nonconst branch";
+        (* a priori unknown size *)
+        let ast_id_n = no_loc (Id id) in
+        let loop_cmpex = Some (no_loc (Bop (Lt, ast_id_n, no_loc (Id s)))) in
+        let loop_inc = Some (no_loc (Assn (ast_id_n, no_loc (Bop (Add, ast_id_n, no_loc (CInt 1L)))))) in
+        let c' = Ctxt.add c id (I64, Id id) in
+        let ast_arr_op = begin match arr_op with
+          | Id i -> Ast.Id i
+          | _ -> failwith "broken invariant: oat_alloc_array"
+        end in
+        (* TODO: use lift *)
+        let _, loop_code = cmp_stmt tc c' Void
+          (no_loc @@ Ast.For ([id, Ast.no_loc (CInt 0L)], loop_cmpex, loop_inc,
+            [no_loc (Ast.Assn (no_loc (Index (no_loc ast_arr_op, ast_id_n)), e2))])) in
+        arr_ty, arr_op, size_code >@ alloc_code >@ loop_code
+    end
 
    (* STRUCT TASK: complete this code that compiles struct expressions.
       For each field component of the struct
@@ -334,7 +399,7 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
       let e_ty, e_op, e_code = cmp_exp tc c e in
       let field_loc, field_loc_casted = gensym "fl", gensym "flc" in
       s >@ e_code >@ lift
-        [ field_loc, Gep(struct_ty, struct_op, [Const 0L; i64_op_of_int ind ])
+        [ field_loc, Gep(struct_ty, struct_op, [i64_op_of_int 0; i64_op_of_int ind ])
         ; field_loc_casted, Bitcast(e_ty, e_op, ll_field_ty)
         ; "",  Store(ll_field_ty, Id field_loc_casted, Id field_loc) ]
     in
@@ -363,8 +428,8 @@ and cmp_exp_lhs (tc : TypeCtxt.t) (c:Ctxt.t) (e:exp node) : Ll.ty * Ll.operand *
   | Ast.Proj (e, i) ->
     let e_ty, e_op, e_code = cmp_exp tc c e in
     let struct_id = begin match e_ty with
-      | Ptr (Namedt t) | Namedt t -> t
-      | _ -> failwith "this should not happen" end in
+      | Ptr (Namedt t) -> t
+      | _ -> failwith "broken invariant: cant get struct name" end in
     let field_ty, field_ind = TypeCtxt.lookup_field_name struct_id i tc in
     let field_loc = gensym "flcl" in
     ( cmp_ty tc field_ty
@@ -385,10 +450,12 @@ and cmp_exp_lhs (tc : TypeCtxt.t) (c:Ctxt.t) (e:exp node) : Ll.ty * Ll.operand *
     let ans_ty = match arr_ty with
       | Ptr (Struct [_; Array (_,t)]) -> t
       | _ -> failwith "Index: indexed into non pointer" in
-    let ptr_id, tmp_id = gensym "index_ptr", gensym "tmp" in
+    let ptr_id, tmp_id, cast_id = gensym "index_ptr", gensym "tmp", gensym "cast" in
     ans_ty, (Id ptr_id),
     arr_code >@ ind_code >@ lift
-      [ptr_id, Gep(arr_ty, arr_op, [i64_op_of_int 0; i64_op_of_int 1; ind_op]) ]
+      [ cast_id, Bitcast (arr_ty, arr_op, Ptr I64)
+      ; "", Call (Void, Gid "oat_assert_array_length", [Ptr I64, Id cast_id; I64, ind_op])
+      ; ptr_id, Gep(arr_ty, arr_op, [i64_op_of_int 0; i64_op_of_int 1; ind_op]) ]
 
 
 
@@ -414,7 +481,7 @@ and cmp_exp_as (tc : TypeCtxt.t) (c:Ctxt.t) (e:Ast.exp node) (t:Ll.ty) : Ll.oper
   else let res_id = gensym "cast" in
     Id res_id, code >:: I(res_id, Bitcast(from_t, op, t))
 
-(* Compile a statement in context c with return typ rt. Return a new context,
+(* Compile a statement in context c with return type rt. Return a new context,
    possibly extended with new local bindings, and the instruction stream
    implementing the statement.
 
