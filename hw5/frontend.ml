@@ -181,7 +181,7 @@ let size_oat_ty (t : Ast.ty) = 8L
 (* Generate code to allocate an array of source type TRef (RArray t) of the
    given size. Note "size" is an operand whose value can be computed at
    runtime *)
-let oat_alloc_array ct (t:Ast.ty) (size:Ll.operand) : Ll.ty * operand * stream =
+let oat_alloc_array ct (t:Ast.ty) (size:Ll.operand) : Ll.ty * Ll.operand * stream =
   let ans_id, arr_id = gensym "array", gensym "raw_array" in
   let ans_ty = cmp_ty ct @@ TRef (RArray t) in
   let arr_ty = Ptr I64 in
@@ -333,7 +333,6 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
     begin match size_op with
       | Null -> failwith "broken invariant: size operand is null"
       | Const size ->
-        print_endline "hello I am in the const branch";
         (* unroll loop, size is known at compile time *)
         let {elt=e2e;loc=e2l} = e2 in
         let rec construct_r (n : int) (f : int -> 'a) : 'a list =
@@ -353,35 +352,48 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
           | Length {elt=e;loc=l}
             -> Length {elt=replace_id n e;loc=l}
           | CStruct (i, ienl)
-            -> CStruct (i, List.map (fun (x, {elt=a;loc=b}) -> x, {elt=replace_id n a;loc=b}) ienl)
+            -> CStruct (i,
+                List.map (fun (x, {elt=a;loc=b}) -> x, {elt=replace_id n a;loc=b}) ienl)
           | Proj ({elt=e;loc=l}, i)
             -> Proj ({elt=replace_id n e;loc=l}, i)
           | Call ({elt=e;loc=l}, enl)
-            -> Call ({elt=replace_id n e;loc=l}, List.map (fun {elt=a;loc=b} -> {elt=replace_id n a;loc=b}) enl)
+            -> Call ({elt=replace_id n e;loc=l},
+                List.map (fun {elt=a;loc=b} -> {elt=replace_id n a;loc=b}) enl)
           | Bop (b, {elt=e1;loc=l1}, {elt=e2;loc=l2})
             -> Bop (b, {elt=replace_id n e1;loc=l1}, {elt=replace_id n e2;loc=l2})
           | Uop (u, {elt=e;loc=l})
             -> Uop (u, {elt=replace_id n e;loc=l})
           | e -> e
         in
-        cmp_exp tc c @@ {elt=Ast.CArr (elt_ty, List.rev @@ construct_r (Int64.to_int size) (fun i -> {elt=replace_id i e2e;loc=e2l})); loc=exp.loc}
-      | Gid s | Id s ->
-        (* this is broken as fuck ..*)
-        print_endline "hello I am in the nonconst branch";
+        cmp_exp tc c @@ {elt=Ast.CArr (elt_ty,
+          List.rev @@ construct_r (Int64.to_int size)
+            (fun i -> {elt=replace_id i e2e;loc=e2l})); loc=exp.loc}
+      | Gid size | Id size ->
         (* a priori unknown size *)
+        let temp, size_ptr = gensym "tmp", gensym "tmp" in
         let ast_id_n = no_loc (Id id) in
-        let loop_cmpex = Some (no_loc (Bop (Lt, ast_id_n, no_loc (Id s)))) in
-        let loop_inc = Some (no_loc (Assn (ast_id_n, no_loc (Bop (Add, ast_id_n, no_loc (CInt 1L)))))) in
-        let c' = Ctxt.add c id (I64, Id id) in
         let ast_arr_op = begin match arr_op with
           | Id i -> Ast.Id i
           | _ -> failwith "broken invariant: oat_alloc_array"
         end in
-        (* TODO: use lift *)
-        let _, loop_code = cmp_stmt tc c' Void
-          (no_loc @@ Ast.For ([id, Ast.no_loc (CInt 0L)], loop_cmpex, loop_inc,
-            [no_loc (Ast.Assn (no_loc (Index (no_loc ast_arr_op, ast_id_n)), e2))])) in
-        arr_ty, arr_op, size_code >@ alloc_code >@ loop_code
+        let loop_cmpex = Some (no_loc @@ Bop (Lt, ast_id_n, no_loc @@ Id size_ptr)) in
+        let loop_inc = Some (no_loc @@
+          Assn (ast_id_n, no_loc @@ Bop (Add, ast_id_n, no_loc @@ CInt 1L))) in
+        let c' = Ctxt.add c temp (Ptr arr_ty, Id temp) in
+        let c' = Ctxt.add c' size_ptr (Ptr I64, Id size_ptr) in
+        let loop = (no_loc @@ Ast.For (
+          [id, no_loc (CInt 0L)],
+          loop_cmpex,
+          loop_inc,
+          [ no_loc @@ Ast.Assn (no_loc @@ Index (no_loc @@ Id temp, ast_id_n), e2)]))
+        in let _, loop_code = cmp_stmt tc c' arr_ty loop in
+        arr_ty, arr_op, size_code
+          >@ alloc_code
+          >@ [I (size_ptr, Alloca I64)]
+          >@ [I ("", Store (I64, size_op, Id size_ptr))]
+          >@ [I (temp, Alloca arr_ty)]
+          >@ [I ("", Store (arr_ty, arr_op, Id temp))]
+          >@ loop_code
     end
 
    (* STRUCT TASK: complete this code that compiles struct expressions.
