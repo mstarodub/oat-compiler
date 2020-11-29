@@ -305,12 +305,12 @@ and typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * 
     -> let t1, t2 = typecheck_exp tc e1, typecheck_exp tc e2 in
       if begin match e1.elt with
           | Id i
-            -> begin match lookup_global_option i tc with
-                | Some TRef (RFun _) -> begin match lookup_local_option i tc with
-                    | Some _ -> false
-                    | None -> true
+            -> begin match lookup_local_option i tc with
+                | Some _ -> false
+                | None -> begin match lookup_global_option i tc with
+                    | Some TRef (RFun _) -> true
+                    | _ -> false
                   end
-                | _ -> false
               end
           | _ -> false
         end
