@@ -174,25 +174,28 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
     -> typecheck_ty e c ty;
       let ts = List.map (typecheck_exp c) es in
       if not @@ all @@ List.map (fun t -> subtype c t ty) ts
-      then type_error e "incorrect member type";
+      then type_error e ("incompatible member type, expected " ^ (Astlib.ml_string_of_ty  ty));
       TRef (RArray ty)
   | NewArr (ty, e1, i, e2)
     -> typecheck_ty e c ty;
-    let crct = typecheck_exp c e1 = TInt
-      && lookup_local_option i c = None
-      && subtype c (typecheck_exp (add_local c i TInt) e2) ty
-    in if crct
-    then TRef (RArray ty)
-    else type_error e "illegal redefinition or wrong array type"
+    if typecheck_exp c e1 <> TInt
+    then type_error e "incompatible length type, expected int"
+    else if lookup_local_option i c <> None
+    then type_error e ("illegal redefinition of variable " ^ i)
+    else if not @@ subtype c (typecheck_exp (add_local c i TInt) e2) ty
+    then type_error e "illegal array initialiser type, expected x -> int"
+    else TRef (RArray ty)
   | Index (e1, e2)
     -> begin match typecheck_exp c e1, typecheck_exp c e2 with
         | TRef (RArray ty), TInt -> ty
-        | _ -> type_error e "cannot index into type"
+        | TRef (RArray ty), _ -> type_error e "incompatible index type, expected int"
+        | ty, TInt -> type_error e ("cannot index into type " ^ (Astlib.ml_string_of_ty ty))
+        | _, _ -> type_error e "malformed index expression"
       end
   | Length e'
     -> begin match typecheck_exp c e' with
         | TRef (RArray _) -> TInt
-        | _ -> type_error e "cannot take length of non-array type"
+        | ty -> type_error e ("cannot take length of " ^ (Astlib.ml_string_of_ty ty))
       end
   | CStruct (i, ies)
     -> let rec aux ascl_a : unit =
@@ -200,25 +203,25 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
         | [] -> ()
         | (ai, ae)::axs
           -> let t = begin match lookup_field_option i ai c with
-              | None -> type_error e ("struct has no such field " ^ i)
+              | None -> type_error e ("struct " ^ i ^ " has no such field " ^ ai)
               | Some x -> x
             end in
             let t' = typecheck_exp c ae in
             if not (subtype c t t')
-            then type_error e "type mismatch for struct initialisation"
+            then type_error e ("incompatible type for field initialiser, expected " ^ (Astlib.ml_string_of_ty t))
             else aux axs
       in
         if lookup_struct_option i c = None
-        then type_error e "undeclared struct"
+        then type_error e ("no such struct " ^ i)
         else if not @@ samelen ies (lookup_struct i c)
-        then type_error e "argument mismatch, cannot initialise struct"
+        then type_error e "argument number mismatch, cannot initialise struct"
         else aux ies;
         TRef (RStruct i)
   | Proj (e', i)
     -> let struct_exists tc s = List.mem s (List.map fst tc.structs) in
       let str = begin match typecheck_exp c e' with
         | TRef (RStruct x) when struct_exists c x -> x
-        | _ -> type_error e "cannot take field of non-struct"
+        | x -> type_error e ("incompatible type, expected struct, got " ^ (Astlib.ml_string_of_ty x))
       end
       in begin match lookup_field_option str i c with
         | None -> type_error e ("struct has no such field " ^ i)
@@ -227,10 +230,10 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
   | Call (f, es)
     -> let arg_tys, r_ty = begin match typecheck_exp c f with
         | TRef (RFun (x, RetVal y)) -> (x, y)
-        | _ -> type_error e "cannot call non-function"
+        | x -> type_error e ("incompatible type, expected function, got " ^ (Astlib.ml_string_of_ty x))
       end in let ts = List.map (typecheck_exp c) es in
       if not @@ samelen ts arg_tys
-      then type_error e "wrong number of args"
+      then type_error e "argument number mismatch"
       else if not @@ all @@ zipwith (subtype c) ts arg_tys
       then type_error e "incompatible argument types"
       else r_ty
@@ -238,18 +241,20 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
     -> let t1, t2 = typecheck_exp c e1, typecheck_exp c e2 in
       if subtype c t1 t2 && subtype c t2 t1
       then TBool
-      else type_error e "incompatible types, cannot compare"
+      else type_error e ("incompatible types, cannot compare "
+        ^ (Astlib.ml_string_of_ty t1) ^ " with " ^ (Astlib.ml_string_of_ty t2))
   | Bop (bop, e1, e2)
     -> let t1, t2 = typecheck_exp c e1, typecheck_exp c e2 in
       let tbop1, tbop2, tbop3 = typ_of_binop bop in
       if tbop1 = t1 && tbop2 = t2
       then tbop3
-      else type_error e "incompatible types, cannot perform bop"
+      else type_error e ("incompatible types, expected "
+        ^ (Astlib.ml_string_of_ty tbop1) ^ " and " ^ (Astlib.ml_string_of_ty tbop2))
   | Uop (uop, e')
     -> let tuop1, tuop2 = typ_of_unop uop in
       if typecheck_exp c e' = tuop1
       then tuop2
-      else type_error e "incompatible types, cannot perform uop"
+      else type_error e ("incompatible type, expected " ^ (Astlib.ml_string_of_ty tuop1))
 
 (* statements --------------------------------------------------------------- *)
 
@@ -302,16 +307,17 @@ and typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * 
           | Id i
             -> begin match lookup_global_option i tc with
                 | Some TRef (RFun _) -> begin match lookup_local_option i tc with
-                    | Some _ -> true
-                    | None -> false
+                    | Some _ -> false
+                    | None -> true
                   end
-                | _ -> true
+                | _ -> false
               end
-          | _ -> true
+          | _ -> false
         end
-        && subtype tc t2 t1
-      then tc, false
-      else type_error s "illegal redefinition or incompatible type, cannot assign"
+      then type_error s "illegal redefinition"
+      else if not @@ subtype tc t2 t1
+      then type_error s ("incompatible type, expected " ^ (Astlib.ml_string_of_ty t1))
+      else tc, false
   | Decl vd
     -> let id = fst vd in
       let ty_e = typecheck_exp tc (snd vd) in
@@ -322,13 +328,13 @@ and typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * 
     -> begin match to_ret, eo with
         | RetVoid, None -> tc, true
         | RetVal t, Some rt when subtype tc (typecheck_exp tc rt) t -> tc, true
-        | _ -> type_error s "incompatible return type"
+        | x, _ -> type_error s ("incompatible return type, expected " ^ (Astlib.ml_string_of_ret_ty x))
       end
   | SCall (e, es)
     -> let ts' = List.map (typecheck_exp tc) es in
       let ts = begin match typecheck_exp tc e with
         | TRef (RFun (x, RetVoid)) -> x
-        | _ -> type_error s "incompatible function type"
+        | _ -> type_error s "incompatible function type, expected void return"
       end in if all @@ zipwith (subtype tc) ts' ts
       then tc, false
       else type_error s "incompatible argument types"
@@ -341,12 +347,12 @@ and typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * 
   | Cast (rt, id, e, ss1, ss2)
     -> let e_ty = begin match typecheck_exp tc e with
         | TNullRef x -> x
-        | _ -> type_error s "incompatible type, not a nullable reftype"
+        | _ -> type_error s "incompatible type, expected nullable reftype"
       end in let rets = (snd @@ typecheck_block (add_local tc id (TRef rt)) to_ret ss1)
           && (snd @@ typecheck_block tc to_ret ss2) in
       if subtype_ref tc e_ty rt
       then tc, rets
-      else type_error s "incompatible reftype"
+      else type_error s ("incompatible reftype, expected " ^ (Astlib.ml_string_of_reft rt))
   | For (vds, eo, so, ss)
     -> let f = fun c (i, e) -> begin match lookup_local_option i tc with
         | Some _ -> type_error s "redefinition of variable inside for prelude"
