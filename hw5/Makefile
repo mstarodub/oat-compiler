@@ -1,6 +1,6 @@
 INCLUDES= util,x86,grading,ll
 LIBS = unix,str
-SUBMIT := frontend.ml typechecker.ml
+SUBMIT := frontend.ml typechecker.ml testgraded.ml
 OTHER := gradedtests.ml studenttests.ml main.ml
 
 HWNAME := hw05
@@ -16,7 +16,7 @@ test: main.native
 
 .PHONY: main.native
 main.native: $(SUBMIT) $(OTHER)
-	ocamlbuild -Is $(INCLUDES) -libs $(LIBS) main.native -use-menhir -pkg num -yaccflag --explain
+	ocamlbuild -cflags -g -Is $(INCLUDES) -libs $(LIBS) main.native -use-menhir -pkg num -yaccflag --explain
 
 .PHONY: repl
 repl: main.native
@@ -24,7 +24,6 @@ repl: main.native
 
 zip: $(SUBMIT)
 	zip '$(ZIPNAME)' $(SUBMIT)
-	@echo "[NOTE] Please also additionally add the three test cases (positive/negative/new oat feature) to the archive."
 
 .PHONY: clean
 clean:
