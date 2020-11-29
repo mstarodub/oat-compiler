@@ -539,17 +539,17 @@ and cmp_stmt (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt
        - as in the if-then-else construct, you should jump to the common
          merge label after either block
   *)
-  (* Cast of rty * id * exp node * stmt node list * stmt node list *)
   | Ast.Cast (typ, id, exp, notnull, null) ->
      let exp_ty, exp_op, exp_code = cmp_exp tc c exp in
-     let notnull_code = cmp_block tc (Ctxt.add c id (Ptr exp_ty, Id id)) rt notnull in
+     let ll_refty = cmp_rty tc typ in
+     let notnull_code = cmp_block tc (Ctxt.add c id (ll_refty, Id id)) rt notnull in
      let null_code = cmp_block tc c rt null in
      let [lt; le; lm; tmp] = List.map gensym ["null"; "notnull"; "merge"; "tmp"] in
      c, exp_code
         >:: I (tmp, Icmp (Ne, exp_ty, exp_op, Null))
         >:: T (Cbr (Id tmp, lt, le))
-        >:: L lt >:: I (id, Alloca exp_ty)
-          >:: I ("", Store (exp_ty, exp_op, Id id)) >@ notnull_code
+        >:: L lt >:: I (id, Alloca ll_refty)
+          >:: I ("", Store (ll_refty, exp_op, Id id)) >@ notnull_code
           >:: T(Br lm)
         >:: L le >@ null_code >:: T(Br lm)
         >:: L lm
