@@ -287,7 +287,7 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
   *)
   | Ast.Length e ->
     let ty, op, code = cmp_exp tc c e in
-    let e_ty = begin match ty with
+    let _ = begin match ty with
       | Ptr (Struct [_; Array (_, t)]) -> t
       | _ -> failwith "broken invariant: length: not an array" end in
     let ans_id, temp = gensym "length", gensym "tmp" in
@@ -511,7 +511,7 @@ and cmp_stmt (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt
      let else_code = cmp_block tc c rt st2 in
      let lt, le, lm = gensym "then", gensym "else", gensym "merge" in
      c, guard_code
-        >:: T(Cbr (guard_op, lt, le))
+        >:: T (Cbr (guard_op, lt, le))
         >:: L lt >@ then_code >:: T(Br lm)
         >:: L le >@ else_code >:: T(Br lm)
         >:: L lm
@@ -524,11 +524,23 @@ and cmp_stmt (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt
        - the identifier id is in scope in the 'nutnull' block and so
          needs to be allocated (and added to the context)
 
-       - as in the if-the-else construct, you should jump to the common
+       - as in the if-then-else construct, you should jump to the common
          merge label after either block
   *)
+  (* Cast of rty * id * exp node * stmt node list * stmt node list *)
   | Ast.Cast (typ, id, exp, notnull, null) ->
-    failwith "todo: implement Ast.Cast case"
+     let exp_ty, exp_op, exp_code = cmp_exp tc c exp in
+     let notnull_code = cmp_block tc (Ctxt.add c id (Ptr exp_ty, Id id)) rt notnull in
+     let null_code = cmp_block tc c rt null in
+     let [lt; le; lm; tmp] = List.map gensym ["null"; "notnull"; "merge"; "tmp"] in
+     c, exp_code
+        >:: I (tmp, Icmp (Ne, exp_ty, exp_op, Null))
+        >:: T (Cbr (Id tmp, lt, le))
+        >:: L lt >:: I (id, Alloca exp_ty)
+          >:: I ("", Store (exp_ty, exp_op, Id id)) >@ notnull_code
+          >:: T(Br lm)
+        >:: L le >@ null_code >:: T(Br lm)
+        >:: L lm
 
   | Ast.While (guard, body) ->
      let guard_ty, guard_op, guard_code = cmp_exp tc c guard in
