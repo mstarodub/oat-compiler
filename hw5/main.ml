@@ -22,6 +22,7 @@ let args =
   ; ("--print-ll", Set print_ll_flag, "prints the program's LL code (after lowering to clang code if --clang-malloc is set)")
   ; ("--print-x86", Set print_x86_flag, "prints the program's assembly code")
   ; ("--print-regs", Set print_regs_flag, "prints the register usage statistics for x86 code")
+  ; ("--print-ast", Set print_ast_flag, "prints the program ast")
   ; ("--clang", Set clang, "compiles to assembly using clang, not the 341 backend (implies --clang-malloc)")
   ; ("--execute-x86", Set execute_x86, "run the resulting executable file")
   ; ("-v", Set Platform.verbose, "enables more verbose compilation output")
