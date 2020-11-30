@@ -1,6 +1,6 @@
 INCLUDES= util,x86,grading,ll
 LIBS = unix,str
-SUBMIT := frontend.ml typechecker.ml testgraded.ml
+SUBMIT := frontend.ml typechecker.ml testgraded.ml trmxs.oat trmxs.input
 OTHER := gradedtests.ml studenttests.ml main.ml
 
 HWNAME := hw05
@@ -13,6 +13,11 @@ all: main.native
 .PHONY: test
 test: main.native
 	./main.native --test
+
+.PHONY: prog
+prog: main.native
+	./main.native trmxs.oat runtime.c
+	xargs -d '\n' -a trmxs.input ./a.out
 
 .PHONY: main.native
 main.native: $(SUBMIT) $(OTHER)

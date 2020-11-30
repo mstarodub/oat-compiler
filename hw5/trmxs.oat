@@ -1,0 +1,12 @@
+/* Maxim Starodub */
+/* Tynan Richards */
+
+int
+program(int argc, string[] argv)
+{
+	for(var i = 1; i < length(argv); i = i + 1; ) {
+		print_string(argv[i]);
+		print_string("\n");
+	}
+	return 0;
+}
