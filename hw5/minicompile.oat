@@ -1,0 +1,194 @@
+/* Maxim Starodub */
+/* Tynan Richards */
+
+global none = 0;
+
+global op_mul = 1;
+global op_div = 2;
+global op_add = 3;
+global op_sub = 4;
+
+global tk_eof   = 1;
+global tk_num   = 2;
+global tk_op    = 3;
+global tk_left  = 4;
+global tk_right = 5;
+
+struct Token {
+	int tk;
+	int op
+}
+
+struct Lex_ctxt {
+	Token[] stream;
+	int pos
+}
+
+Token
+mktk(int t, int o) {
+	return new Token {tk=t; op=o};
+}
+
+void
+die(string msg)
+{
+	print_string(msg);
+	print_string("\n");
+	var a = (new int[1] {i -> i})[1];
+	return;
+}
+
+Token
+decide(Token[] prev, int ind)
+{
+	if (ind < length(prev)) {
+		return prev[ind];
+	}
+	else {
+		return mktk(none, none);
+	}
+}
+
+void
+push_l(Lex_ctxt lc, Token t)
+{
+	var prevlen = length(lc.stream);
+	if (lc.pos >= prevlen) {
+		lc.stream = new Token[prevlen * 2] { i -> decide(lc.stream, i) };
+	}
+	lc.stream[lc.pos] = t;
+	lc.pos = lc.pos + 1;
+	return;
+}
+
+Token
+pop_l(Lex_ctxt lc)
+{
+	lc.pos = lc.pos - 1;
+	return lc.stream[lc.pos];
+}
+
+/* produces a Token stream or errors out */
+Token[]
+lex(string input)
+{
+	/* ascii */
+	var input = array_of_string(input);
+
+	var lc = new Lex_ctxt {
+		stream=new Token[500] {i -> new Token {tk=none; op=none} };
+		pos=0
+	};
+
+	for (var i = 0; i < length(input); i = i + 1;) {
+		var c = input[i];
+		/* : | \n */
+		if (c == 58 | c == 10) {
+			push_l(lc, mktk(tk_eof, none));
+		}
+		/* space */
+		else if (c == 32) {
+			var pass = none;
+		}
+		/* * */
+		else if (c == 42) {
+			push_l(lc, mktk(tk_op, op_mul));
+		}
+		/* / */
+		else if (c == 47) {
+			push_l(lc, mktk(tk_op, op_div));
+		}
+		/* + */
+		else if (c == 43) {
+			push_l(lc, mktk(tk_op, op_add));
+		}
+		/* - */
+		else if (c == 45) {
+			push_l(lc, mktk(tk_op, op_sub));
+		}
+		/* ( */
+		else if (c == 40) {
+			push_l(lc, mktk(tk_left, none));
+		}
+		/* ) */
+		else if (c == 41) {
+			push_l(lc, mktk(tk_right, none));
+		}
+		/* 0 | ... | 9 */
+		else if (c >= 48 & c <= 57) {
+			var num = c - 48;
+			if (num == 0) {
+				push_l(lc, mktk(tk_num, num));
+			}
+			else {
+				var last = pop_l(lc);
+				if (last.tk == tk_num) {
+					push_l(lc, mktk(tk_num, (last.op * 10) + num));
+				}
+				else {
+					push_l(lc, last);
+					push_l(lc, mktk(tk_num, num));
+				}
+			}
+		}
+		else {
+			die("bad input");
+		}
+	}
+	return new Token[lc.pos] {i -> lc.stream[i] };
+}
+
+void
+p_print_tokens(Token[] stream)
+{
+	for (var i = 0; i < length(stream); i = i + 1;) {
+		var ct = stream[i].tk;
+		var cn = stream[i].op;
+		if (ct == tk_eof) {
+			return;
+		}
+		else if (ct == tk_num) {
+			print_int(cn);
+		}
+		else if (ct == tk_op) {
+			if (cn == op_mul) {
+				print_string("*");
+			}
+			else if (cn == op_div) {
+				print_string("/");
+			}
+			else if (cn == op_add) {
+				print_string("+");
+			}
+			else if (cn == op_sub) {
+				print_string("-");
+			}
+			else {
+				die("invalid op");
+			}
+		}
+		else if (ct == tk_left) {
+			print_string("(");
+		}
+		else if (ct == tk_right) {
+			print_string(")");
+		}
+		else {
+			die("invalid tk");
+		}
+	}
+	return;
+}
+
+int
+program(int argc, string[] argv)
+{
+	if (argc < 1) {
+		die("no input");
+		return 1;
+	}
+	var lexed = lex(argv[1]);
+	p_print_tokens(lexed);
+	print_string("\n");
+	return 0;
+}

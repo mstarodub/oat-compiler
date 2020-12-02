@@ -1,6 +1,6 @@
 INCLUDES= util,x86,grading,ll
 LIBS = unix,str
-SUBMIT := frontend.ml typechecker.ml testgraded.ml trmxs.oat trmxs.input
+SUBMIT := frontend.ml typechecker.ml testgraded.ml minicompile.oat
 OTHER := gradedtests.ml studenttests.ml main.ml
 
 HWNAME := hw05
@@ -16,8 +16,7 @@ test: main.native
 
 .PHONY: prog
 prog: main.native
-	./main.native trmxs.oat runtime.c
-	xargs -d '\n' -a trmxs.input ./a.out
+	./main.native minicompile.oat runtime.c -o minicompile
 
 .PHONY: main.native
 main.native: $(SUBMIT) $(OTHER)
