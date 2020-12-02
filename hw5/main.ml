@@ -4,7 +4,7 @@ open Assert
 open Driver
 
 exception Ran_tests
-let suite = ref (Studenttests.provided_tests @ Gradedtests.graded_tests @ Testgraded.graded_unit_tests)
+let suite = ref (Studenttests.provided_tests @ Gradedtests.graded_tests @ Testgraded.graded_unit_tests @ Testgraded.oatprogram_test)
 
 let execute_tests () =
   Platform.configure_os ();

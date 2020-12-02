@@ -16,7 +16,7 @@ test: main.native
 
 .PHONY: prog
 prog: main.native
-	./main.native minicompile.oat runtime.c -o minicompile
+	./main.native --clang minicompile.oat runtime.c -o minicompile
 
 .PHONY: main.native
 main.native: $(SUBMIT) $(OTHER)

@@ -1,6 +1,15 @@
 /* Maxim Starodub */
 /* Tynan Richards */
 
+/*
+ * TempleOS minicompiler in oat
+ *
+ * ./main.native --clang minicompile.oat runtime.c -o minicompile
+ * ./minicompile "2 * ( 1 + 2);" > out.s
+ * gcc out.s
+ */
+
+
 global none = 0;
 
 global op_mul = 1;
@@ -33,7 +42,7 @@ void
 die(string msg)
 {
 	print_string(msg);
-	print_string("\n");
+	print_string(", quitting out \n");
 	var a = (new int[1] {i -> i})[1];
 	return;
 }
@@ -64,8 +73,22 @@ push_l(Lex_ctxt lc, Token t)
 Token
 pop_l(Lex_ctxt lc)
 {
-	lc.pos = lc.pos - 1;
-	return lc.stream[lc.pos];
+	if (lc.pos > 0) {
+		lc.pos = lc.pos - 1;
+		return lc.stream[lc.pos];
+	}
+	else {
+		return mktk(none, none);
+	}
+}
+
+Lex_ctxt
+mkctxt(int sz)
+{
+	return new Lex_ctxt {
+		stream=new Token[sz] {i -> new Token {tk=none; op=none} };
+		pos=0
+	};
 }
 
 /* produces a Token stream or errors out */
@@ -75,15 +98,12 @@ lex(string input)
 	/* ascii */
 	var input = array_of_string(input);
 
-	var lc = new Lex_ctxt {
-		stream=new Token[500] {i -> new Token {tk=none; op=none} };
-		pos=0
-	};
+	var lc = mkctxt(500);
 
 	for (var i = 0; i < length(input); i = i + 1;) {
 		var c = input[i];
 		/* : | \n */
-		if (c == 58 | c == 10) {
+		if (c == 59 | c == 10) {
 			push_l(lc, mktk(tk_eof, none));
 		}
 		/* space */
@@ -117,67 +137,241 @@ lex(string input)
 		/* 0 | ... | 9 */
 		else if (c >= 48 & c <= 57) {
 			var num = c - 48;
-			if (num == 0) {
+			var last = pop_l(lc);
+			if (last.tk == none) {
 				push_l(lc, mktk(tk_num, num));
 			}
+			else if (last.tk == tk_num) {
+				push_l(lc, mktk(tk_num, (last.op * 10) + num));
+			}
 			else {
-				var last = pop_l(lc);
-				if (last.tk == tk_num) {
-					push_l(lc, mktk(tk_num, (last.op * 10) + num));
-				}
-				else {
-					push_l(lc, last);
-					push_l(lc, mktk(tk_num, num));
-				}
+				push_l(lc, last);
+				push_l(lc, mktk(tk_num, num));
 			}
 		}
 		else {
-			die("bad input");
+			die("lex: bad input");
 		}
 	}
 	return new Token[lc.pos] {i -> lc.stream[i] };
 }
 
 void
+p_print_token(Token t)
+{
+	var ct = t.tk;
+	var cn = t.op;
+	if (ct == tk_eof) {
+		print_string(";");
+		return;
+	}
+	else if (ct == tk_num) {
+		print_int(cn);
+	}
+	else if (ct == tk_op) {
+		if (cn == op_mul) {
+			print_string("*");
+		}
+		else if (cn == op_div) {
+			print_string("/");
+		}
+		else if (cn == op_add) {
+			print_string("+");
+		}
+		else if (cn == op_sub) {
+			print_string("-");
+		}
+		else {
+			die("print: invalid op");
+		}
+	}
+	else if (ct == tk_left) {
+		print_string("(");
+	}
+	else if (ct == tk_right) {
+		print_string(")");
+	}
+	else {
+		die("print: invalid tk");
+	}
+
+	return;
+}
+
+void
 p_print_tokens(Token[] stream)
 {
+	for (var i = 0; i < length(stream); i = i + 1;) {
+		p_print_token(stream[i]);
+		print_string(" ");
+	}
+	print_string("\n");
+	return;
+}
+
+bool
+tilt(Lex_ctxt ops, Lex_ctxt out, Token stop)
+{
+	var x = pop_l(ops);
+	while(x.tk != none) {
+		if (x.tk == stop.tk) {
+			return true;
+		}
+		push_l(out, x);
+		x = pop_l(ops);
+	}
+	return false;
+}
+
+Token
+peek(Lex_ctxt lc)
+{
+	var x = pop_l(lc);
+	if (x.tk != none) {
+		push_l(lc, x);
+	}
+	return x;
+}
+
+int
+precedence(int op)
+{
+	if (op == op_mul | op == op_div) {
+		return 2;
+	}
+	if (op == op_add | op == op_sub) {
+		return 1;
+	}
+	return none;
+}
+
+Token[]
+parse(Token[] stream)
+{
+	var res = mkctxt(500);
+	var stack = mkctxt(500);
+	var end = false;
+	var cont = true;
+	for (var i = 0; i < length(stream) & cont; i = i + 1;) {
+		var ct = stream[i].tk;
+		var cn = stream[i].op;
+		if (ct == tk_num) {
+			push_l(res, stream[i]);
+		}
+		else if (ct == tk_left) {
+			push_l(stack, stream[i]);
+		}
+		else if (ct == tk_right) {
+			if (!tilt(stack, res, mktk(tk_left, none))) {
+				die("parse: no matching paren");
+			}
+		}
+		else if (ct == tk_op) {
+			var top = peek(stack);
+			var cont = true;
+			while (top.tk != none & cont) {
+				if (top.tk == tk_left) {
+					cont = false;
+				}
+				else if (top.tk == tk_op) {
+					var p = precedence(top.op);
+					var q = precedence(cn);
+					if (p > q) {
+						push_l(res, pop_l(stack));
+					}
+					else {
+						cont = false;
+					}
+				}
+				else {
+					die("parse: malformed stack top");
+				}
+				top = peek(stack);
+			}
+			push_l(stack, stream[i]);
+		}
+		else if (ct == tk_eof) {
+			cont = false;
+			end = true;
+		}
+		else {
+			print_int(ct);
+			die("parse: invalid tk");
+		}
+	}
+
+	if (tilt(stack, res, mktk(tk_left, none))) {
+		die("parse: no matching paren");
+	}
+
+	if (end) {
+		push_l(res, mktk(tk_eof, none));
+	}
+
+	return new Token[res.pos] {i -> res.stream[i] };
+}
+
+string
+app(string s1, string s2)
+{
+	var x = string_cat(s1, "\t");
+	x = string_cat(x, s2);
+	return string_cat(x, "\n");
+}
+
+
+string
+compile(Token[] stream)
+{
+	var cmp = ".text\n.globl main\nmain:\n";
 	for (var i = 0; i < length(stream); i = i + 1;) {
 		var ct = stream[i].tk;
 		var cn = stream[i].op;
 		if (ct == tk_eof) {
-			return;
+			cmp = app(cmp, "popq %rax");
+			cmp = app(cmp, "retq");
 		}
 		else if (ct == tk_num) {
-			print_int(cn);
+			cmp = string_cat(cmp, "\tmovq $");
+			cmp = string_cat(cmp, string_of_int(cn));
+			cmp = string_cat(cmp, ", %rax\n");
+			cmp = app(cmp, "pushq %rax");
 		}
 		else if (ct == tk_op) {
 			if (cn == op_mul) {
-				print_string("*");
+				cmp = app(cmp, "popq %rdx");
+				cmp = app(cmp, "popq %rax");
+				cmp = app(cmp, "imulq %rdx, %rax");
+				cmp = app(cmp, "pushq %rax");
 			}
 			else if (cn == op_div) {
-				print_string("/");
+				cmp = app(cmp, "popq %rbx");
+				cmp = app(cmp, "popq %rax");
+				cmp = app(cmp, "xorq %rdx, %rdx");
+				cmp = app(cmp, "idivq %rbx");
+				cmp = app(cmp, "pushq %rax");
 			}
 			else if (cn == op_add) {
-				print_string("+");
+				cmp = app(cmp, "popq %rdx");
+				cmp = app(cmp, "popq %rax");
+				cmp = app(cmp, "addq %rdx, %rax");
+				cmp = app(cmp, "pushq %rax");
 			}
 			else if (cn == op_sub) {
-				print_string("-");
+				cmp = app(cmp, "popq %rdx");
+				cmp = app(cmp, "popq %rax");
+				cmp = app(cmp, "subq %rdx, %rax");
+				cmp = app(cmp, "pushq %rax");
 			}
 			else {
-				die("invalid op");
+				die("compile: invalid op");
 			}
 		}
-		else if (ct == tk_left) {
-			print_string("(");
-		}
-		else if (ct == tk_right) {
-			print_string(")");
-		}
 		else {
-			die("invalid tk");
+			die("compile: invalid tk");
 		}
 	}
-	return;
+	return cmp;
 }
 
 int
@@ -188,7 +382,8 @@ program(int argc, string[] argv)
 		return 1;
 	}
 	var lexed = lex(argv[1]);
-	p_print_tokens(lexed);
-	print_string("\n");
+	print_string("# ");
+	p_print_tokens(parse(lexed));
+	print_string(compile(parse(lexed)));
 	return 0;
 }
