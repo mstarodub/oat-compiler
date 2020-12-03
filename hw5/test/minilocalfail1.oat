@@ -1,0 +1,13 @@
+int
+lex(string input)
+{
+	/* illegal */
+	var input = array_of_string(input);
+	return input[0];
+}
+
+int program(int argc, string[] argv)
+{
+	var lexed = lex("adf");
+	return 0;
+}

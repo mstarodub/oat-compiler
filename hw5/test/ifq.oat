@@ -1,0 +1,18 @@
+int sum(int[]? arr) {
+    var acc = 0;
+    if? (int[] a = arr) {
+        acc = acc + a[0];
+    }
+    return acc;
+}
+
+
+int program (int argc, string[] argv) {
+  if? (int[] a = int[] null) {
+  	print_string("hello");
+  }
+  else {
+  	print_string("Hello");
+  }
+  return 0;
+}

@@ -1,0 +1,21 @@
+void
+parse()
+{
+	var cont = true;
+	if (cont) {
+		if (1 < 2) {
+			print_string("");
+		}
+		else if (0 < 3) {
+			/* illegal */
+			var cont = false;
+		}
+	}
+	return;
+}
+
+int program(int argc, string[] argv)
+{
+	parse();
+	return 0;
+}
