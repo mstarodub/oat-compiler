@@ -93,10 +93,10 @@ mkctxt(int sz)
 
 /* produces a Token stream or errors out */
 Token[]
-lex(string input)
+lex(string input_)
 {
 	/* ascii */
-	var input = array_of_string(input);
+	var input = array_of_string(input_);
 
 	var lc = mkctxt(500);
 
@@ -268,10 +268,10 @@ parse(Token[] stream)
 		}
 		else if (ct == tk_op) {
 			var top = peek(stack);
-			var cont = true;
-			while (top.tk != none & cont) {
+			var cont2 = true;
+			while (top.tk != none & cont2) {
 				if (top.tk == tk_left) {
-					cont = false;
+					cont2 = false;
 				}
 				else if (top.tk == tk_op) {
 					var p = precedence(top.op);
@@ -280,7 +280,7 @@ parse(Token[] stream)
 						push_l(res, pop_l(stack));
 					}
 					else {
-						cont = false;
+						cont2 = false;
 					}
 				}
 				else {

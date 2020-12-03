@@ -109,7 +109,7 @@ let executed tests =
 
 let executed_oat_file tests =
   List.map (fun (path, args, ans) ->
-      (path ^ " args: " ^ args), assert_eqf (fun () -> oat_file_test path args) ans)
+      (path ^ " args: " ^ args), assert_eqf (fun () -> let x = oat_file_test path args in print_endline (String.concat "\n" ["expected:"; "-"; ans; "-"; "got:"; "-"; x; "-"]); x) ans)
     tests
 
 let executed_tc_ok_file tests =

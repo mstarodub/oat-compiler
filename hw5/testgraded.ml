@@ -41,5 +41,8 @@ let graded_unit_tests : suite =
   ; unit_fail ]
 
 let oatprogram_test : suite = [
-  Test("minicompiler", Gradedtests.executed_oat_file ["minicompile.oat", "\"2 * ( 1 + 2) ;\"", "# 2 1 2 + * ; \n.text\n.globl main\nmain:\n\tmovq $2, %rax\n\tpushq %rax\n\tmovq $1, %rax\n\tpushq %rax\n\tmovq $2, %rax\n\tpushq %rax\n\tpopq %rdx\n\tpopq %rax\n\taddq %rdx, %rax\n\tpushq %rax\n\tpopq %rdx\n\tpopq %rax\n\timulq %rdx, %rax\n\tpushq %rax\n\tpopq %rax\n\tretq\n"])
+  Test("minicompiler", Gradedtests.executed_oat_file [
+      "minicompile.oat",
+      "\"2 * ( 1 + 2) ;\"",
+      "# 2 1 2 + * ; \n.text\n.globl main\nmain:\n\tmovq $2, %rax\n\tpushq %rax\n\tmovq $1, %rax\n\tpushq %rax\n\tmovq $2, %rax\n\tpushq %rax\n\tpopq %rdx\n\tpopq %rax\n\taddq %rdx, %rax\n\tpushq %rax\n\tpopq %rdx\n\tpopq %rax\n\timulq %rdx, %rax\n\tpushq %rax\n\tpopq %rax\n\tretq0"])
 ]
