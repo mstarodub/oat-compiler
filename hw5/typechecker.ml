@@ -339,8 +339,9 @@ and typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * 
       then tc, false
       else type_error s "incompatible argument types"
   | If (e, ss1, ss2)
-    -> let rets = (snd @@ typecheck_block tc to_ret ss1)
-          && (snd @@ typecheck_block tc to_ret ss2) in
+    -> let ret1 = (snd @@ typecheck_block tc to_ret ss1) in
+      let ret2 = (snd @@ typecheck_block tc to_ret ss2) in
+      let rets = ret1 && ret2 in
       if typecheck_exp tc e = TBool
       then tc, rets
       else type_error s "incompatible condition type, expected bool"
