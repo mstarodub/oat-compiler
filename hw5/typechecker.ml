@@ -400,7 +400,7 @@ let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
 *)
 let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
   let ctxt = List.fold_left
-    (fun c -> uncurry (add_global c))
+    (fun c -> uncurry (add_local c))
     tc
     (List.map (fun (x,y) -> (y,x)) f.args) in
   if not @@ snd @@ typecheck_block ctxt f.frtyp f.body
