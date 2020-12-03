@@ -17,6 +17,7 @@ let tc_err_tests = [
   ; "test/redeclarelocal.oat"
   ; "test/minilocalfail1.oat"
   ; "test/minilocalfail2.oat"
+  ; "test/minilocalfail3.oat"
 ]
 
 let run_tests = [

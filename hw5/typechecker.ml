@@ -349,8 +349,10 @@ and typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * 
     -> let e_ty = begin match typecheck_exp tc e with
         | TNullRef x -> x
         | _ -> type_error s "incompatible type, expected nullable reftype"
-      end in let rets = (snd @@ typecheck_block (add_local tc id (TRef rt)) to_ret ss1)
-          && (snd @@ typecheck_block tc to_ret ss2) in
+      end in
+      let ret1 = (snd @@ typecheck_block (add_local tc id (TRef rt)) to_ret ss1) in
+      let ret2 = (snd @@ typecheck_block tc to_ret ss2) in
+      let rets = ret1 && ret2 in
       if subtype_ref tc e_ty rt
       then tc, rets
       else type_error s ("incompatible reftype, expected " ^ (Astlib.ml_string_of_reft rt))
