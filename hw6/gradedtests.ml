@@ -131,7 +131,7 @@ let throw_key_diff compare val_to_string a b =
   else begin
     let str_a = LblM.to_string val_to_string a in
     let str_b = LblM.to_string val_to_string b in
-    failwith @@ Printf.sprintf "Output differs at labels: %s in maps\n%s\n%s\n"
+    failwith @@ Printf.sprintf "Output differs at labels: %s in maps\nResult:\n%s\nExpected:\n%s\n"
       (String.concat ", " keys)
       str_a
       str_b

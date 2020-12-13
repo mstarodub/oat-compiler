@@ -33,9 +33,53 @@ type fact = SymPtr.t UidM.t
    - Other instructions do not define pointers
 
  *)
-let insn_flow ((u,i):uid * insn) (d:fact) : fact =
-  failwith "Alias.insn_flow unimplemented"
+let op_to_uid op =
+  match op with
+    | Id uid -> Some uid
+    | _ -> None
 
+let add_unique uid d =
+  UidM.add uid SymPtr.Unique d
+
+let add_alias uid d =
+  UidM.add uid SymPtr.MayAlias d
+
+let update_alias uid d =
+  let update = fun i -> if i = SymPtr.UndefAlias then i else SymPtr.MayAlias in
+  try UidM.update update uid d with Not_found -> d
+
+let update_op op d =
+  match op with
+    | Id uid -> update_alias uid d
+    | _ -> d
+
+let update_aliases uids d =
+  let f = fun a b -> update_alias b a in
+  List.fold_left f d uids
+
+let update_ops ops d =
+  let uids = List.filter_map op_to_uid ops in
+  update_aliases uids d
+
+let add_alias_if_ptr uid ty d =
+  match ty with
+    | Ptr _ -> add_alias uid d
+    | _ -> d
+
+let add_alias_if_ptr_ptr uid ty d =
+  match ty with
+    | Ptr (Ptr _) -> add_alias uid d
+    | _ -> d
+
+let insn_flow ((uid, insn):uid * insn) (d:fact) : fact =
+  match insn with
+    | Alloca _ ->             d |> add_unique uid
+    | Load (ty, _) ->         d |> add_alias_if_ptr_ptr uid ty
+    | Call (ty, op, args) ->  d |> add_alias_if_ptr uid ty |> update_ops (List.map snd args)
+    | Bitcast (ty, op, _) ->  d |> add_alias_if_ptr uid ty |> update_op op
+    | Gep (_, op, opl) ->     d |> add_alias uid |> update_ops (op::opl)
+    | Store (_, op, _) ->     d |> update_op op
+    | _ ->                    d
 
 (* The flow function across terminators is trivial: they never change alias info *)
 let terminator_flow t (d:fact) : fact = d
@@ -68,8 +112,22 @@ module Fact =
        It may be useful to define a helper function that knows how to take the
        join of two SymPtr.t facts.
     *)
+    let join_symptr (a: SymPtr.t) (b: SymPtr.t) : SymPtr.t =
+      match a with
+        | MayAlias -> a
+        | Unique -> if b = SymPtr.MayAlias then b else a
+        | UndefAlias -> b
+
+    let merge (k: UidM.key) (a: SymPtr.t option) (b: SymPtr.t option) : SymPtr.t option =
+      match a with
+        | Some ap -> begin match b with
+            | Some bp -> Some (join_symptr ap bp)
+            | None -> a
+          end
+        | None -> b
+
     let combine (ds:fact list) : fact =
-      failwith "Alias.Fact.combine not implemented"
+      List.fold_left (UidM.merge merge) UidM.empty ds
   end
 
 (* instantiate the general framework ---------------------------------------- *)
