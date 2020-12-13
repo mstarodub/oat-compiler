@@ -120,11 +120,11 @@ module Fact =
 
     let merge (k: UidM.key) (a: SymPtr.t option) (b: SymPtr.t option) : SymPtr.t option =
       match a with
-        | Some ap -> begin match b with
-            | Some bp -> Some (join_symptr ap bp)
-            | None -> a
-          end
         | None -> b
+        | Some ap -> begin match b with
+            | None -> a
+            | Some bp -> Some (join_symptr ap bp)
+          end
 
     let combine (ds:fact list) : fact =
       List.fold_left (UidM.merge merge) UidM.empty ds
