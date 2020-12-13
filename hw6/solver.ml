@@ -88,6 +88,38 @@ module Make (Fact : FACT) (Graph : DFA_GRAPH with type fact := Fact.t) =
   struct
 
     let solve (g:Graph.t) : Graph.t =
-      failwith "TODO HW6: Solver.solve unimplemented"
+      let rec analyze (graph:Graph.t) (nodes_to_analyze: Graph.NodeS.t) : Graph.t =
+        (* Pick any node in queue *)
+        let n = Graph.NodeS.choose nodes_to_analyze in
+        (* Store old out fact for comparison *)
+        let old_out = Graph.out graph n in
+
+        (* Combine all incoming facts *)
+        let in_nodes = Graph.preds graph n in
+        let in_facts = List.map (Graph.out graph) (Graph.NodeS.elements in_nodes) in
+        let in_fact = Fact.combine in_facts in
+        (* Calculate new outgoing fact *)
+        let new_out = Graph.flow graph n in_fact in
+        
+        (* Add new fact to graph *)
+        let new_g = Graph.add_fact n new_out graph in
+
+        (* Remove analyzed node, add successors if fact changed *)
+        let remaining_nodes = Graph.NodeS.remove n nodes_to_analyze in
+        let out_nodes = Graph.succs new_g n in
+        let new_nodes_to_analyze = match Fact.compare old_out (Graph.out new_g n) with
+          | 0 -> remaining_nodes
+          | _ -> Graph.NodeS.union remaining_nodes out_nodes
+        in
+
+        (* If there are still nodes left, do another analysis step *)
+        let size = Graph.NodeS.cardinal new_nodes_to_analyze in
+        if size > 0
+        then analyze new_g new_nodes_to_analyze
+        else new_g
+      in
+      (* Init node queue to node set of graph *)
+      let w = Graph.nodes g in
+      analyze g w
   end
 
