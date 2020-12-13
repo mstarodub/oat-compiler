@@ -89,7 +89,7 @@ module Make (Fact : FACT) (Graph : DFA_GRAPH with type fact := Fact.t) =
 
     let solve (g:Graph.t) : Graph.t =
       let rec analyze (graph:Graph.t) (nodes_to_analyze: Graph.NodeS.t) : Graph.t =
-        (* Pick any node in queue *)
+        (* Pick any node in worklist *)
         let n = Graph.NodeS.choose nodes_to_analyze in
         (* Store old out fact for comparison *)
         let old_out = Graph.out graph n in
@@ -119,7 +119,6 @@ module Make (Fact : FACT) (Graph : DFA_GRAPH with type fact := Fact.t) =
         else new_g
       in
       (* Init node queue to node set of graph *)
-      let w = Graph.nodes g in
-      analyze g w
+      analyze g (Graph.nodes g)
   end
 

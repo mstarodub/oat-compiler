@@ -21,10 +21,32 @@ open Datastructures
 
    Hint: Consider using List.filter
  *)
+(* Returns true if uid_2 is_live at program point uid *)
+let is_live uid lb uid_2 : bool =
+  try UidS.mem uid_2 (lb uid) with Not_found -> false
+
+(* Returns true if uid_2 may be aliased at program point uid *)
+let may_alias uid ab uid_2 : bool =
+  try ((UidM.find uid_2 (ab uid)) = Alias.SymPtr.MayAlias) with Not_found -> false
+
+let is_live_store uid lb ab op : bool =
+  match op with
+    | Id uid_2 -> is_live uid lb uid_2 || may_alias uid ab uid_2
+    | _ -> false
+
+let is_live_insn lb ab (uid, insn) : bool =
+  match insn with
+    | Call _ -> true
+    | Store (_, _, op) -> is_live_store uid lb ab op
+    | _ -> is_live uid lb uid
+
 let dce_block (lb:uid -> Liveness.Fact.t)
               (ab:uid -> Alias.fact)
-              (b:Ll.block) : Ll.block =
-  failwith "Dce.dce_block unimplemented"
+              ({insns; term}:Ll.block) : Ll.block =
+  {
+    insns = List.filter (is_live_insn lb ab) insns;
+    term
+  }
 
 let run (lg:Liveness.Graph.t) (ag:Alias.Graph.t) (cfg:Cfg.t) : Cfg.t =
 
