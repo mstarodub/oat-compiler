@@ -173,17 +173,37 @@ let analyze (g:Cfg.t) : Graph.t =
 (* HINT: your cp_block implementation will probably rely on several helper
    functions.                                                                 *)
 
-let cp_insn_temp (fact: Fact.t) (insn: Ll.insn) : Ll.insn option =
-  failwith "unimplemented cp_insn"
+(* replace uids with const op *)
+let replace_op (fact: Fact.t) (op:Ll.operand) : Ll.operand =
+  match op with
+    | Id uid -> begin match UidM.find uid fact with
+        | SymConst.Const c -> Ll.Const c
+        | _ -> Id uid
+      end
+    | op -> op
 
-let cp_insn (cb: uid -> Fact.t) ((uid, insn): Ll.uid * Ll.insn) : Ll.insn option =
+let replace_ops (fact: Fact.t) (ops: Ll.operand list) : Ll.operand list =
+  List.map (replace_op fact) ops
+
+(* replace uids that hold constant values *)
+let cp_insn (cb: uid -> Fact.t) ((uid, insn): Ll.uid * Ll.insn) : (Ll.uid * Ll.insn) =
   let fact = cb uid in
-  cp_insn_temp fact insn
-
-let cp_block_temp (cb: uid -> Fact.t) ({insns; term}:Ll.block) : Ll.block =
-  let new_insns = List.filter_map (cp_insn cb) insns in
-  (* TODO: remove insns if term is const *)
-  failwith "unimplemented cp_block_temp"
+  let f = replace_op fact in
+  let g = replace_ops fact in
+  let i = match insn with
+    | Binop (bop, ty, op1, op2) -> Binop (bop, ty, f op1, f op2)
+    | Alloca ty -> Alloca ty
+    | Load (ty, op) -> Load (ty, f op)
+    | Store (ty, op1, op2) -> Store (ty, f op1, f op2)
+    | Icmp (cnd, ty, op1, op2) -> Icmp (cnd, ty, f op1, f op2)
+    | Bitcast (ty, op, ty2) -> Bitcast (ty, f op, ty2)
+    | Gep (ty, op, oplist) -> Gep (ty, f op, g oplist)
+    | Call (ty, op, tyoplist) ->
+      let (tys, ops) = List.split tyoplist in
+      let new_tyoplist = List.combine tys (g ops) in
+      Call (ty, f op, new_tyoplist)
+  in
+  (uid, i)
 
 let run (cg:Graph.t) (cfg:Cfg.t) : Cfg.t =
   let open SymConst in
@@ -192,7 +212,20 @@ let run (cg:Graph.t) (cfg:Cfg.t) : Cfg.t =
   let cp_block (l:Ll.lbl) (cfg:Cfg.t) : Cfg.t =
     let b = Cfg.block cfg l in
     let cb = Graph.uid_out cg l in
-    let b' = cp_block_temp cb b in
+
+    let {insns; term} = b in
+
+    let new_insns = List.map (cp_insn cb) insns in
+    let (uid, t) = term in
+    let f = replace_op (cb uid) in
+    let new_term = match t with
+      | Ret (ty, None) -> Ret (ty, None)
+      | Ret (ty, Some op) -> Ret (ty, Some (f op))
+      | Br lbl -> Br lbl
+      | Cbr (op, lbl1, lbl2) -> Cbr (f op, lbl1, lbl2)
+    in
+
+    let b' = { insns = new_insns; term = (uid, new_term) } in
     Cfg.add_block l b' cfg
   in
 
