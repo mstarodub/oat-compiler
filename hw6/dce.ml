@@ -32,6 +32,7 @@ let may_alias uid ab uid_2 : bool =
 let is_live_store uid lb ab op : bool =
   match op with
     | Id uid_2 -> is_live uid lb uid_2 || may_alias uid ab uid_2
+    | Gid gid -> true
     | _ -> false
 
 let is_live_insn lb ab (uid, insn) : bool =

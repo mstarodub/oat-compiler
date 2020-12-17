@@ -740,7 +740,7 @@ let greedy_layout (f:Ll.fdecl) (live:liveness) : layout =
 *)
 
 let better_layout (f:Ll.fdecl) (live:liveness) : layout =
-  failwith "Backend.better_layout not implemented"
+  greedy_layout f live
 
 
 
