@@ -885,29 +885,17 @@ let rec k_color_graph (g:graph) (k:int) : coloring =
   if List.length g < 2 then base_cases g k else normal_case g k
 
 let better_layout (f:Ll.fdecl) ({live_in; live_out}:liveness) : layout =
-  (*
-  let node1 = ("node1", ["node2"]) in
-  let node2 = ("node2", ["node1"; "node3"; "node4"; "node5"]) in
-  let node3 = ("node3", ["node2"; "node4"; "node5"]) in
-  let node4 = ("node4", ["node2"; "node3"; "node5"]) in
-  let node5 = ("node5", ["node2"; "node3"; "node4"]) in
-  let graph = [node1; node2; node3; node4; node5] in
-  let {colored_nodes; spilled_nodes} = k_color_graph graph 3 in
-
-  print_endline "";
-  print_endline "Coloring:";
-  print_endline @@ print_colored_nodes colored_nodes;
-  print_endline "Spilled:";
-  print_endline @@ String.concat " " spilled_nodes;
-  print_endline "";
-
-  print_endline "---------------";
-
-  ----- *)
+  (* Register palette *)
   let pal = [ Rdi; Rsi; Rdx; R09; R08; R10; R11 ]
     |> List.map (fun r -> Alloc.LReg r)
   in
 
+  (* Fold over f_decl, gathering information:
+    assn_uids -> all uids that are assigned to
+    insn_uids -> all instruction uids
+    other -> allocations for labels and instruction
+              uids that are not assigned to
+  *)
   let (assn_uids, insn_uids, other_allocs) = fold_fdecl
     (fun (assn, insn, other) (x, _) -> (x::assn, insn, other))
     (fun (assn, insn, other) l -> (assn, insn, (l, Alloc.LLbl (Platform.mangle l))::other))
@@ -923,14 +911,25 @@ let better_layout (f:Ll.fdecl) ({live_in; live_out}:liveness) : layout =
     Rcx is used by the compiler for other purposes.
     I haven't yet seen any tests fail because of that though... *)
 
-  (* Create interference graph with no edges *)
+  (* If function parameters aren't used (i.e. they're dead on entry)
+    we can just assign them the location they are already in. Otherwise
+    they could receive the same location as another function parameter
+    (because they don't interfere) and overwrite it. *)
+  let {f_ty; f_param; f_cfg} = f in
+  let live_f_params = Datastructures.UidS.elements @@ live_in Cfg.entry_lbl in
+  let unused_f_params = remove_all live_f_params f_param in
+
+  (* Combine all liveness information to create a graph *)
   let live_in_sets = List.map live_in insn_uids in
   let live_out_sets = List.map live_out insn_uids in
   let live_ins = List.map Datastructures.UidS.elements live_in_sets in
   let live_outs = List.map Datastructures.UidS.elements live_out_sets in
   let lives = live_ins @ live_outs in
 
-  let temp_g = List.map (fun uid -> (uid, [])) assn_uids in
+  (* Don't color unused function parameters *)
+  let nodes = remove_all unused_f_params assn_uids in
+  (* Create interference graph *)
+  let temp_g = List.map (fun uid -> (uid, [])) nodes in
   let g = List.fold_left add_all_edges temp_g lives in
   (* Might be worth checking for "useless" edges? 
      i.e edges to nodes that don't exist. They
@@ -944,6 +943,7 @@ let better_layout (f:Ll.fdecl) ({live_in; live_out}:liveness) : layout =
   print_endline "------";
   *)
 
+  (* Run coloring algorithm *)
   let k = List.length pal in
   let {colored_nodes; spilled_nodes} = k_color_graph g k in
   
@@ -957,26 +957,31 @@ let better_layout (f:Ll.fdecl) ({live_in; live_out}:liveness) : layout =
   *)
   
   let registers = pal in
-  let {f_ty; f_param; f_cfg} = f in
-  (* BUG: If function parameters aren't used, they can receive the same color
-    as another function parameter (which is used), and can overwrite it. *)
   (* TODO: map colors to registers so function parameters don't need to move *)
+  (* Map graph coloring to registers *)
   let col_reg_map = List.combine (List.init (List.length registers) Fun.id) registers in
 
+  (* Allocate colored uids *)
   let func = fun l (uid, col) -> (uid, List.assoc col col_reg_map)::l in
   let reg_list = List.fold_left func [] colored_nodes in
   
+  (* Allocate spilled uids *)
   let func = fun (n,l) uid -> (n+1, (uid, Alloc.LStk (- (n + 1)))::l) in
   let (n_spilled, spill_list) = List.fold_left func (0,[]) spilled_nodes in
 
-  let alloc_list = reg_list @ spill_list @ other_allocs in
+  (* "Allocate" unused function parameters to their arg_locs *)
+  let (_, all_arglocs) = List.fold_left (fun (n, l) uid -> (n+1, (uid, arg_loc n)::l)) (0, []) f_param in
+  let unused_arglocs = List.fold_left (fun l uid -> List.remove_assoc uid l) all_arglocs live_f_params in
 
-  let print_alloc = fun (uid, alloc) -> String.concat " -> " [uid; Alloc.str_loc alloc] in
-  
+  (* Combine all allocations, including block labels *)
+  let alloc_list = unused_arglocs @ reg_list @ spill_list @ other_allocs in
+
   (* Uncomment to print the uid allocations
-  print_endline @@ String.concat "\n" (List.map print_alloc alloc_list);
+    let print_alloc = fun (uid, alloc) -> String.concat " -> " [uid; Alloc.str_loc alloc] in
+    print_endline @@ String.concat "\n" (List.map print_alloc alloc_list);
   *)
 
+  (* Return layout *)
   { uid_loc = (fun uid -> try List.assoc uid alloc_list with Not_found -> print_endline uid; raise Not_found)
   ; spill_bytes = 8 * n_spilled
   }
