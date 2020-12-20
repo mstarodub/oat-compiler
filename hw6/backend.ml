@@ -848,10 +848,13 @@ let rec k_color_graph (g:graph) (k:int) : coloring =
   in
 
   let spill_node (g:graph) (k:int) : coloring =
-    (* TODO: implement intelligent spilling strategy (e.g. choosing well-connected nodes) *)
-    let node_to_spill = List.hd g in
+    (* Choose node with most adjacent nodes *)
+    let max_adj = fun (uid_max, max) (uid, adj) ->
+      let num_adj = List.length adj in
+      if num_adj > max then (uid, num_adj) else (uid_max, max)
+    in
+    let (uid, _) = List.fold_left max_adj (fst (List.hd g), 0) g in
 
-    let (uid, adj) = node_to_spill in
     let subgraph = remove_node g uid in
     let {colored_nodes; spilled_nodes} = k_color_graph subgraph k in
 
@@ -907,10 +910,6 @@ let better_layout (f:Ll.fdecl) ({live_in; live_out}:liveness) : layout =
     ([],[],[]) f
   in
 
-  (* TODO: Always spill third argument into stack slot
-    Rcx is used by the compiler for other purposes.
-    I haven't yet seen any tests fail because of that though... *)
-
   (* If function parameters aren't used (i.e. they're dead on entry)
     we can just assign them the location they are already in. Otherwise
     they could receive the same location as another function parameter
@@ -941,10 +940,6 @@ let better_layout (f:Ll.fdecl) ({live_in; live_out}:liveness) : layout =
   (* Create interference graph *)
   let temp_g = List.map (fun uid -> (uid, [])) nodes in
   let g = List.fold_left add_all_edges temp_g lives in
-  (* Might be worth checking for "useless" edges? 
-     i.e edges to nodes that don't exist. They
-     could mess up the coloring algorithm. 
-     But it should probably never happen. *)
   
   (* Uncomment to print the graph
   print_endline "";
@@ -981,6 +976,7 @@ let better_layout (f:Ll.fdecl) ({live_in; live_out}:liveness) : layout =
   let registers = pal in
   let (_, all_arglocs) = List.fold_left (fun (n, l) uid -> (n+1, (uid, arg_loc n)::l)) (0, []) f_param in
   (* Map graph coloring to registers *)
+  (* TODO: also pay attention to Call instructions to pre-map colors to registers *)
   let colored_live_params = remove_all spilled_nodes live_f_params in
   let live_f_param_colors = List.map (fun uid -> (uid, List.assoc uid colored_nodes)) colored_live_params in
   let live_f_param_allocs = List.map (fun uid -> (uid, List.assoc uid all_arglocs)) colored_live_params in
