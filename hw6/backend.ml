@@ -919,6 +919,16 @@ let better_layout (f:Ll.fdecl) ({live_in; live_out}:liveness) : layout =
   let live_f_params = Datastructures.UidS.elements @@ live_in Cfg.entry_lbl in
   let unused_f_params = remove_all live_f_params f_param in
 
+  (* Spill the rcx param if it exists and is live *)
+  let (rcx_param, rcx_unused_param) = if (List.length f_param > 3)
+    then
+      let uid = List.nth f_param 3 in
+      if List.mem uid live_f_params
+        then (Some uid, None)
+        else (None, Some uid)
+    else (None, None)
+  in
+
   (* Combine all liveness information to create a graph *)
   let live_in_sets = List.map live_in insn_uids in
   let live_out_sets = List.map live_out insn_uids in
@@ -945,8 +955,19 @@ let better_layout (f:Ll.fdecl) ({live_in; live_out}:liveness) : layout =
 
   (* Run coloring algorithm *)
   let k = List.length pal in
-  let {colored_nodes; spilled_nodes} = k_color_graph g k in
+  let {colored_nodes; spilled_nodes} = match rcx_param with
+    | Some uid ->
+      let subgraph = remove_node g uid in
+      let {colored_nodes; spilled_nodes} = k_color_graph subgraph k in
+
+      {
+        colored_nodes = colored_nodes;
+        spilled_nodes = uid::spilled_nodes
+      }
+    | None -> k_color_graph g k
+  in
   
+
   (* Uncomment to print the graph coloring
   print_endline "Coloring:";
   print_endline @@ print_colored_nodes colored_nodes;
@@ -956,10 +977,58 @@ let better_layout (f:Ll.fdecl) ({live_in; live_out}:liveness) : layout =
   print_endline "------";
   *)
   
+  let colors = List.init k Fun.id in
   let registers = pal in
-  (* TODO: map colors to registers so function parameters don't need to move *)
+  let (_, all_arglocs) = List.fold_left (fun (n, l) uid -> (n+1, (uid, arg_loc n)::l)) (0, []) f_param in
   (* Map graph coloring to registers *)
-  let col_reg_map = List.combine (List.init (List.length registers) Fun.id) registers in
+  let colored_live_params = remove_all spilled_nodes live_f_params in
+  let live_f_param_colors = List.map (fun uid -> (uid, List.assoc uid colored_nodes)) colored_live_params in
+  let live_f_param_allocs = List.map (fun uid -> (uid, List.assoc uid all_arglocs)) colored_live_params in
+  let live_f_param_regs = List.filter (
+    fun (uid, alloc) -> match alloc with
+      (* Exclude Rcx *)
+      | Alloc.LReg Rcx -> false
+      | Alloc.LReg r -> true
+      | _ -> false
+  ) live_f_param_allocs in
+
+  (*
+  print_endline "-----";
+  print_endline @@ String.concat " " colored_live_params;
+  print_endline @@ String.concat " " (List.map (fun (uid, col) -> String.concat "" ["("; uid; "->"; string_of_int col; ")"]) live_f_param_colors);
+  print_endline @@ String.concat " " (List.map (fun (uid, reg) -> String.concat "" ["("; uid; "->"; Alloc.str_loc reg; ")"]) live_f_param_regs);
+  print_endline "-----";
+  *)
+
+  let partial_map_opt = List.map (fun uid -> try Some (List.assoc uid live_f_param_colors, List.assoc uid live_f_param_regs) with Not_found -> None) colored_live_params in
+
+  let partial_map = List.fold_left (
+    fun l o -> match o with
+      | Some s -> s::l
+      | None -> l
+  ) [] partial_map_opt in
+
+
+  let used_colors = List.map fst partial_map in
+  let used_regs = List.map snd partial_map in
+  let remaining_colors = remove_all used_colors colors in
+  let remaining_regs = remove_all used_regs registers in
+
+  let remaining_map = List.combine remaining_colors remaining_regs in
+  let col_reg_map = partial_map @ remaining_map in
+
+  (* Uncomment to print color register map
+  let print_map_entry = fun (col, reg) -> String.concat " -> " [string_of_int col; Alloc.str_loc reg] in
+  let print_map = fun map -> String.concat "\n" @@ List.map print_map_entry map in
+  print_endline "------------";
+  print_endline "Partial map:";
+  print_endline @@ print_map partial_map;
+  print_endline "Remaining map:";
+  print_endline @@ print_map remaining_map;
+  print_endline "Color map:";
+  print_endline @@ print_map col_reg_map;
+  print_endline "------------";
+  *)
 
   (* Allocate colored uids *)
   let func = fun l (uid, col) -> (uid, List.assoc col col_reg_map)::l in
@@ -970,15 +1039,19 @@ let better_layout (f:Ll.fdecl) ({live_in; live_out}:liveness) : layout =
   let (n_spilled, spill_list) = List.fold_left func (0,[]) spilled_nodes in
 
   (* "Allocate" unused function parameters to their arg_locs *)
-  let (_, all_arglocs) = List.fold_left (fun (n, l) uid -> (n+1, (uid, arg_loc n)::l)) (0, []) f_param in
   let unused_arglocs = List.fold_left (fun l uid -> List.remove_assoc uid l) all_arglocs live_f_params in
+  let rcx_argloc = Option.to_list (
+    match rcx_unused_param with
+      | Some uid -> Some (uid, Alloc.LReg Rcx)
+      | None -> None
+  ) in
 
   (* Combine all allocations, including block labels *)
-  let alloc_list = unused_arglocs @ reg_list @ spill_list @ other_allocs in
+  let alloc_list = rcx_argloc @ unused_arglocs @ reg_list @ spill_list @ other_allocs in
 
   (* Uncomment to print the uid allocations
-    let print_alloc = fun (uid, alloc) -> String.concat " -> " [uid; Alloc.str_loc alloc] in
-    print_endline @@ String.concat "\n" (List.map print_alloc alloc_list);
+  let print_alloc = fun (uid, alloc) -> String.concat " -> " [uid; Alloc.str_loc alloc] in
+  print_endline @@ String.concat "\n" (List.map print_alloc alloc_list);
   *)
 
   (* Return layout *)
