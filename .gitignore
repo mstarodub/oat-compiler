@@ -32,3 +32,5 @@ _opam/
 *output/
 a.out
 minicompile
+minicompileprograms/
+*.zip
